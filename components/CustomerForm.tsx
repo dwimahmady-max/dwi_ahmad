@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { Customer, Gender, PensionType, LoanType, MaritalStatus, InterestType, RepaymentType, CustomerDocument, DocumentCategory, CustomerStatus } from '../types';
 import { parseCustomerData } from '../services/geminiService';
-import { Save, Sparkles, Loader2, Calculator, UploadCloud, FileText, FileImage, AlertTriangle, AlertCircle, X, CalendarClock, Percent, Wallet, Eye, Trash2, Mic, Square, Video, FileVideo, CheckCircle2, PlayCircle, FileAudio, ExternalLink, Maximize2, UserCircle } from 'lucide-react';
+import { Save, Sparkles, Loader2, Calculator, UploadCloud, FileText, FileImage, AlertTriangle, AlertCircle, X, CalendarClock, Percent, Wallet, Eye, Trash2, Mic, Square, Video, FileVideo, CheckCircle2, PlayCircle, FileAudio, ExternalLink, Maximize2, UserCircle, Info, Calendar, MoreHorizontal } from 'lucide-react';
 
 interface CustomerFormProps {
   initialData?: Customer | null;
@@ -37,7 +37,7 @@ const DEFAULT_FORM_DATA = {
     spkCode: '',
     loanAmount: 0,
     interestType: InterestType.ANNUITY, 
-    interestRate: 35,
+    interestRate: 38, // Default updated to 38 based on request
     tenureMonths: 24,
     monthlyInstallment: 0,
     disbursementDate: new Date().toISOString().split('T')[0],
@@ -63,6 +63,11 @@ const DEFAULT_FORM_DATA = {
     marketingName: ''
 };
 
+const MONTH_NAMES = [
+  "Januari", "Februari", "Maret", "April", "Mei", "Juni", 
+  "Juli", "Agustus", "September", "Oktober", "November", "Desember"
+];
+
 export const CustomerForm: React.FC<CustomerFormProps> = ({ initialData, onSave, onCancel, onDelete }) => {
   const [isProcessingAI, setIsProcessingAI] = useState(false);
   const [aiInput, setAiInput] = useState('');
@@ -70,8 +75,15 @@ export const CustomerForm: React.FC<CustomerFormProps> = ({ initialData, onSave,
   const [uploadedFiles, setUploadedFiles] = useState<CustomerDocument[]>([]);
   const [hasDraft, setHasDraft] = useState(false);
   const [previewFile, setPreviewFile] = useState<CustomerDocument | null>(null);
+  const [equivalentFlatRate, setEquivalentFlatRate] = useState<string>('0');
 
   const [formData, setFormData] = useState(DEFAULT_FORM_DATA);
+
+  // Helper State for Birth Date Split Inputs
+  const [dobDay, setDobDay] = useState('');
+  const [dobMonth, setDobMonth] = useState('');
+  const [dobYear, setDobYear] = useState('');
+  const [age, setAge] = useState('');
 
   const draftKey = initialData ? `koperasi_draft_${initialData.id}` : 'koperasi_draft_new';
 
@@ -148,6 +160,27 @@ export const CustomerForm: React.FC<CustomerFormProps> = ({ initialData, onSave,
     }
   }, [initialData, draftKey]);
 
+  // Sync Birth Date String (YYYY-MM-DD) to Split Inputs
+  useEffect(() => {
+    if (formData.birthDate) {
+        const [y, m, d] = formData.birthDate.split('-');
+        if (y && m && d) {
+            setDobYear(y);
+            setDobMonth(parseInt(m).toString()); // Remove leading zero
+            setDobDay(parseInt(d).toString()); // Remove leading zero
+            
+            // Calc Age
+            const currentYear = new Date().getFullYear();
+            setAge((currentYear - parseInt(y)).toString());
+        }
+    } else {
+        setDobYear('');
+        setDobMonth('');
+        setDobDay('');
+        setAge('');
+    }
+  }, [formData.birthDate]);
+
   useEffect(() => {
       const timer = setTimeout(() => {
           localStorage.setItem(draftKey, JSON.stringify(formData));
@@ -166,27 +199,46 @@ export const CustomerForm: React.FC<CustomerFormProps> = ({ initialData, onSave,
     }));
   }, [formData.loanAmount]);
 
+  // CALCULATION LOGIC UPDATE FOR ANNUITY FORMULA
   useEffect(() => {
     if (formData.loanAmount > 0 && formData.tenureMonths > 0) {
       const principal = formData.loanAmount;
       const months = formData.tenureMonths;
       let calculatedInstallment = 0;
+      let flatRateEquivalent = 0;
 
       if (formData.interestType === InterestType.ANNUITY) {
-        const yearlyRate = formData.interestRate / 100;
-        const monthlyRate = yearlyRate / 12;
-        if (monthlyRate === 0) {
+        // Rumus Anuitas
+        const annualRate = formData.interestRate;
+        const monthlyInterestRate = (annualRate / 100) / 12;
+
+        if (monthlyInterestRate === 0) {
           calculatedInstallment = principal / months;
         } else {
-          calculatedInstallment = principal * (monthlyRate * Math.pow(1 + monthlyRate, months)) / (Math.pow(1 + monthlyRate, months) - 1);
+          const numerator = monthlyInterestRate;
+          const denominator = 1 - Math.pow(1 + monthlyInterestRate, -months);
+          calculatedInstallment = principal * (numerator / denominator);
         }
+
+        const totalPayment = calculatedInstallment * months;
+        const totalInterest = totalPayment - principal;
+        const monthlyInterestNominal = totalInterest / months;
+        flatRateEquivalent = (monthlyInterestNominal / principal) * 100;
+
       } else {
-        const monthlyRate = formData.interestRate / 100;
+        // Rumus Flat
+        const monthlyRatePct = formData.interestRate; 
+        const monthlyRate = monthlyRatePct / 100;
+        
         const principalInstallment = principal / months;
         const interestInstallment = principal * monthlyRate;
         calculatedInstallment = principalInstallment + interestInstallment;
+        
+        flatRateEquivalent = monthlyRatePct;
       }
       
+      setEquivalentFlatRate(flatRateEquivalent.toFixed(2));
+
       const disburseDate = new Date(formData.disbursementDate);
       if (!isNaN(disburseDate.getTime())) {
         const matureDate = new Date(disburseDate);
@@ -198,6 +250,8 @@ export const CustomerForm: React.FC<CustomerFormProps> = ({ initialData, onSave,
           maturityDate: matureDate.toISOString().split('T')[0]
         }));
       }
+    } else {
+        setEquivalentFlatRate('0');
     }
   }, [formData.loanAmount, formData.interestRate, formData.interestType, formData.tenureMonths, formData.disbursementDate]);
 
@@ -205,14 +259,15 @@ export const CustomerForm: React.FC<CustomerFormProps> = ({ initialData, onSave,
   const isDbrHigh = dbrPercentage > 98;
 
   const totalFees = (formData.adminFee || 0) + (formData.provisionFee || 0) + (formData.marketingFee || 0) + (formData.riskReserve || 0) + (formData.flaggingFee || 0);
-  // Simpanan Pokok dan Wajib mengurangi TB
+  
+  // NOTE: Simpanan Pokok dan Wajib dimasukkan ke dalam total potongan (mengurangi terima bersih) sesuai permintaan.
   const totalSavings = (formData.principalSavings || 0) + (formData.mandatorySavings || 0); 
   
-  // Total Blokir
   const blockedInstallmentNominal = (formData.blockedInstallmentCount || 0) * ((formData.monthlyInstallment || 0) + (formData.mandatorySavings || 0));
   const totalBlocking = (formData.blockedAmountSK || 0) + blockedInstallmentNominal;
-
   const totalPelunasan = formData.repaymentAmount || 0;
+  
+  // Total Potongan (Termasuk Simpanan)
   const totalDeductions = totalFees + totalSavings + totalBlocking + totalPelunasan;
   const netReceived = (formData.loanAmount || 0) - totalDeductions;
   
@@ -226,8 +281,62 @@ export const CustomerForm: React.FC<CustomerFormProps> = ({ initialData, onSave,
     }));
   };
 
+  // --- Date Handling Logic ---
+  const updateBirthDate = (d: string, m: string, y: string) => {
+      // Pad with zeros
+      const day = d.padStart(2, '0');
+      const month = m.padStart(2, '0');
+      const year = y;
+      
+      if (y.length === 4 && m && d) {
+          setFormData(prev => ({ ...prev, birthDate: `${year}-${month}-${day}` }));
+      }
+  };
+
+  const handleDayChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+      let val = e.target.value;
+      if (parseInt(val) > 31) val = '31';
+      setDobDay(val);
+      updateBirthDate(val, dobMonth, dobYear);
+  };
+
+  const handleMonthChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+      const val = e.target.value;
+      setDobMonth(val);
+      updateBirthDate(dobDay, val, dobYear);
+  };
+
+  const handleYearChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+      const val = e.target.value;
+      setDobYear(val);
+      updateBirthDate(dobDay, dobMonth, val);
+      
+      if (val.length === 4) {
+          setAge((new Date().getFullYear() - parseInt(val)).toString());
+      }
+  };
+
+  const handleAgeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+      const val = e.target.value;
+      setAge(val);
+      if (val && parseInt(val) > 0) {
+          const calcYear = (new Date().getFullYear() - parseInt(val)).toString();
+          setDobYear(calcYear);
+          // If Day/Month empty, default to Jan 1st
+          const newDay = dobDay || '1';
+          const newMonth = dobMonth || '1';
+          
+          if (!dobDay) setDobDay('1');
+          if (!dobMonth) setDobMonth('1');
+          
+          updateBirthDate(newDay, newMonth, calcYear);
+      }
+  };
+  // ---------------------------
+
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>, category: DocumentCategory) => {
     if (e.target.files) {
+      // Support Multiple Files
       const newFiles: CustomerDocument[] = Array.from(e.target.files).map(file => {
         let type: 'image' | 'pdf' | 'video' | 'audio' | 'other' = 'other';
         if (file.type.startsWith('image/')) type = 'image';
@@ -292,37 +401,58 @@ export const CustomerForm: React.FC<CustomerFormProps> = ({ initialData, onSave,
 
   const formatIDR = (val: number) => new Intl.NumberFormat('id-ID').format(val);
 
-  const DocumentSlot = ({ category, label, acceptedTypes = "image/*,application/pdf" }: { category: DocumentCategory, label: string, acceptedTypes?: string }) => {
+  const DocumentSlot = ({ 
+    category, 
+    label, 
+    acceptedTypes = "image/*,application/pdf", 
+    multiple = false,
+    maxCount = 5 
+  }: { 
+    category: DocumentCategory, 
+    label: string, 
+    acceptedTypes?: string, 
+    multiple?: boolean,
+    maxCount?: number
+  }) => {
     const files = uploadedFiles.filter(f => f.category === category);
     
     return (
       <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 flex flex-col h-full">
         <div className="flex justify-between items-center mb-2">
-          <label className="text-xs font-bold text-slate-700 uppercase">{label}</label>
+          <label className="text-xs font-bold text-slate-700 uppercase flex items-center gap-1">
+            {label}
+            {multiple && <span className="text-[10px] bg-slate-200 px-1 rounded text-slate-500 font-normal">Max {maxCount}</span>}
+          </label>
           {files.length > 0 && <CheckCircle2 size={16} className="text-green-500" />}
         </div>
         
-        <div className="flex-1 space-y-2">
+        <div className="flex-1 space-y-2 mb-2">
           {files.map(file => (
-            <div key={file.id} className="flex items-center justify-between bg-white p-2 rounded border border-slate-100 text-xs">
-               <div className="flex items-center gap-2 truncate max-w-[70%] cursor-pointer group" onClick={() => setPreviewFile(file)}>
-                 {file.type === 'image' ? <FileImage size={14} className="text-purple-500"/> : <FileText size={14} className="text-red-500"/>}
+            <div key={file.id} className="flex items-center justify-between bg-white p-2 rounded border border-slate-100 text-xs shadow-sm">
+               <div className="flex items-center gap-2 truncate max-w-[75%] cursor-pointer group" onClick={() => setPreviewFile(file)}>
+                 {file.type === 'image' && <FileImage size={14} className="text-purple-500"/>}
+                 {file.type === 'video' && <FileVideo size={14} className="text-pink-500"/>}
+                 {file.type === 'audio' && <FileAudio size={14} className="text-yellow-500"/>}
+                 {(file.type === 'pdf' || file.type === 'other') && <FileText size={14} className="text-red-500"/>}
+                 
                  <span className="truncate group-hover:text-blue-600 group-hover:underline" title={file.name}>{file.name}</span>
                </div>
-               <button type="button" onClick={() => removeFile(file.id)} className="text-red-500 hover:text-red-700"><Trash2 size={14}/></button>
+               <button type="button" onClick={() => removeFile(file.id)} className="text-slate-400 hover:text-red-600"><Trash2 size={14}/></button>
             </div>
           ))}
+          {files.length === 0 && <div className="text-[10px] text-slate-400 italic text-center py-4">Belum ada file</div>}
         </div>
 
-        <div className="mt-3 relative">
+        <div className="mt-auto relative">
           <input 
             type="file" 
             accept={acceptedTypes} 
+            multiple={multiple}
             onChange={(e) => handleFileChange(e, category)} 
             className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" 
           />
-          <button type="button" className="w-full py-1.5 border-2 border-dashed border-blue-200 text-blue-600 rounded bg-blue-50/50 hover:bg-blue-100 transition text-xs font-medium flex items-center justify-center gap-1">
-            <UploadCloud size={14} /> Upload {label}
+          <button type="button" className="w-full py-2 border-2 border-dashed border-blue-200 text-blue-600 rounded bg-blue-50/30 hover:bg-blue-100 transition text-xs font-medium flex items-center justify-center gap-1">
+            <UploadCloud size={14} /> Upload
           </button>
         </div>
       </div>
@@ -349,7 +479,7 @@ export const CustomerForm: React.FC<CustomerFormProps> = ({ initialData, onSave,
           <div className="flex-1 overflow-auto bg-slate-900 flex items-center justify-center p-4">
             {isImage && <img src={previewFile.url} alt={previewFile.name} className="max-w-full max-h-[70vh] object-contain rounded-lg shadow-lg" />}
             {isVideo && <video src={previewFile.url} controls className="max-w-full max-h-[70vh] rounded-lg shadow-lg w-full" autoPlay />}
-            {isAudio && <audio src={previewFile.url} controls className="w-full max-w-md" autoPlay />}
+            {isAudio && <div className="bg-white p-8 rounded-full shadow-lg"><audio src={previewFile.url} controls className="w-full max-w-md" autoPlay /></div>}
             {isPdf && <iframe src={previewFile.url} className="w-full h-[70vh] bg-white rounded-lg" title="PDF Preview"></iframe>}
             {!isImage && !isVideo && !isAudio && !isPdf && (
               <div className="text-white text-center">
@@ -398,10 +528,64 @@ export const CustomerForm: React.FC<CustomerFormProps> = ({ initialData, onSave,
               <label className="text-xs font-semibold text-slate-500 uppercase">NIK (KTP)</label>
               <input required name="nik" value={formData.nik} onChange={handleInputChange} className="w-full border border-slate-300 rounded p-2 focus:ring-1 focus:ring-blue-500 outline-none" />
             </div>
+            
+            {/* --- IMPROVED BIRTH DATE INPUT (SPLIT & AGE) --- */}
             <div className="space-y-1">
-              <label className="text-xs font-semibold text-slate-500 uppercase">Tanggal Lahir</label>
-              <input type="date" required name="birthDate" value={formData.birthDate} onChange={handleInputChange} className="w-full border border-slate-300 rounded p-2 outline-none" />
+              <label className="text-xs font-semibold text-slate-500 uppercase flex justify-between">
+                <span>Tanggal Lahir</span>
+                <span className="text-blue-600 cursor-pointer text-[10px]" title="Otomatis hitung tahun lahir">Isi Umur?</span>
+              </label>
+              <div className="flex gap-2">
+                  {/* Tanggal */}
+                  <div className="relative w-20">
+                    <input 
+                        type="number" 
+                        placeholder="Tgl" 
+                        min="1" max="31"
+                        value={dobDay} 
+                        onChange={handleDayChange}
+                        className="w-full border border-slate-300 rounded p-2 text-center outline-none focus:ring-1 focus:ring-blue-500" 
+                    />
+                  </div>
+                  {/* Bulan */}
+                  <div className="relative flex-1">
+                    <select 
+                        value={dobMonth} 
+                        onChange={handleMonthChange}
+                        className="w-full border border-slate-300 rounded p-2 outline-none bg-white focus:ring-1 focus:ring-blue-500"
+                    >
+                        <option value="">- Bulan -</option>
+                        {MONTH_NAMES.map((m, idx) => (
+                            <option key={m} value={idx + 1}>{m}</option>
+                        ))}
+                    </select>
+                  </div>
+                  {/* Tahun */}
+                  <div className="relative w-24">
+                    <input 
+                        type="number" 
+                        placeholder="Tahun" 
+                        min="1900" max="2100"
+                        value={dobYear} 
+                        onChange={handleYearChange}
+                        className="w-full border border-slate-300 rounded p-2 text-center outline-none focus:ring-1 focus:ring-blue-500" 
+                    />
+                  </div>
+                  {/* Umur Shortcut */}
+                   <div className="relative w-20">
+                    <div className="absolute -top-5 right-0 text-[10px] text-slate-400">Umur</div>
+                    <input 
+                        type="number" 
+                        placeholder="Usia" 
+                        value={age} 
+                        onChange={handleAgeChange}
+                        className="w-full border border-blue-200 bg-blue-50 rounded p-2 text-center outline-none text-blue-700 font-bold" 
+                    />
+                  </div>
+              </div>
             </div>
+            {/* ------------------------------------------------ */}
+
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-1">
                 <label className="text-xs font-semibold text-slate-500 uppercase">Jenis Kelamin</label>
@@ -537,15 +721,34 @@ export const CustomerForm: React.FC<CustomerFormProps> = ({ initialData, onSave,
                     <input type="number" min="0" required name="loanAmount" value={formData.loanAmount || ''} onChange={handleInputChange} className="w-full border border-slate-300 rounded p-2 pl-9 outline-none font-bold text-lg" />
                   </div>
                 </div>
+                
+                {/* INTEREST INPUT & EQUIVALENT FLAT */}
                 <div className="flex gap-4">
                   <div className="space-y-1 w-1/2">
                     <label className="text-xs font-semibold text-slate-500 uppercase">Tenor (Bln)</label>
                     <input type="number" min="1" required name="tenureMonths" value={formData.tenureMonths || ''} onChange={handleInputChange} className="w-full border border-slate-300 rounded p-2 outline-none" />
                   </div>
                   <div className="space-y-1 w-1/2">
-                    <label className="text-xs font-semibold text-slate-500 uppercase">Bunga % (Thn)</label>
+                    <label className="text-xs font-semibold text-slate-500 uppercase">
+                        {formData.interestType === InterestType.ANNUITY ? 'Bunga % (Thn)' : 'Bunga % (Bln)'}
+                    </label>
                     <input type="number" step="0.01" required name="interestRate" value={formData.interestRate || ''} onChange={handleInputChange} className="w-full border border-slate-300 rounded p-2 outline-none" />
+                    
+                    {/* Equivalent Flat Display */}
+                    {formData.interestType === InterestType.ANNUITY && formData.loanAmount > 0 && (
+                        <div className="text-[10px] text-orange-600 font-bold mt-1 flex items-center gap-1 bg-orange-50 px-1 py-0.5 rounded">
+                           <Info size={10} /> Setara Flat: {equivalentFlatRate}% / bln
+                        </div>
+                    )}
                   </div>
+                </div>
+                
+                <div className="space-y-1">
+                    <label className="text-xs font-semibold text-slate-500 uppercase">Tipe Bunga</label>
+                     <select name="interestType" value={formData.interestType} onChange={handleInputChange} className="w-full border border-slate-300 rounded p-2 outline-none bg-white text-xs">
+                        <option value={InterestType.ANNUITY}>Anuitas (Bunga Menurun)</option>
+                        <option value={InterestType.FLAT}>Flat (Bunga Tetap)</option>
+                    </select>
                 </div>
              </div>
 
@@ -599,7 +802,7 @@ export const CustomerForm: React.FC<CustomerFormProps> = ({ initialData, onSave,
           {/* Biaya & Simpanan */}
           <div className="mt-6 pt-4 border-t border-blue-200">
              <h4 className="text-xs font-bold text-slate-700 uppercase mb-3">Rincian Potongan</h4>
-             <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
+             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <div className="space-y-1"><label className="text-[10px] uppercase text-slate-500">Admin</label><input readOnly value={formatIDR(formData.adminFee)} className="w-full text-xs p-2 bg-slate-100 rounded" /></div>
                 <div className="space-y-1"><label className="text-[10px] uppercase text-slate-500">Provisi</label><input readOnly value={formatIDR(formData.provisionFee)} className="w-full text-xs p-2 bg-slate-100 rounded" /></div>
                 
@@ -610,6 +813,13 @@ export const CustomerForm: React.FC<CustomerFormProps> = ({ initialData, onSave,
                 </div>
                 
                 <div className="space-y-1"><label className="text-[10px] uppercase text-slate-500">CR (11%)</label><input type="number" name="riskReserve" value={formData.riskReserve || ''} onChange={handleInputChange} className="w-full text-xs p-2 border border-slate-300 rounded" /></div>
+                
+                {/* NEW FLAGGING COLUMN */}
+                <div className="space-y-1">
+                    <label className="text-[10px] uppercase text-slate-500 font-bold text-blue-600">Flagging</label>
+                    <input type="number" name="flaggingFee" value={formData.flaggingFee || ''} onChange={handleInputChange} className="w-full text-xs p-2 border border-blue-300 rounded bg-blue-50" placeholder="0" />
+                </div>
+
                 <div className="space-y-1"><label className="text-[10px] uppercase text-slate-500">Simp. Pokok</label><input type="number" name="principalSavings" value={formData.principalSavings || ''} onChange={handleInputChange} className="w-full text-xs p-2 border border-slate-300 rounded" /></div>
                 
                  {/* Simpanan Wajib READONLY */}
@@ -618,7 +828,7 @@ export const CustomerForm: React.FC<CustomerFormProps> = ({ initialData, onSave,
                     <input readOnly value={formatIDR(formData.mandatorySavings)} className="w-full text-xs p-2 bg-slate-100 text-slate-500 rounded" />
                 </div>
 
-                <div className="space-y-1 lg:col-span-2">
+                <div className="space-y-1">
                    <label className="text-[10px] uppercase text-red-600">Pelunasan</label>
                    <input type="number" name="repaymentAmount" value={formData.repaymentAmount || ''} onChange={handleInputChange} className="w-full text-xs p-2 border border-red-300 rounded bg-red-50" />
                 </div>
@@ -626,7 +836,7 @@ export const CustomerForm: React.FC<CustomerFormProps> = ({ initialData, onSave,
           </div>
 
           <div className="mt-6 bg-green-50 border border-green-200 rounded-xl p-5 flex justify-between items-center">
-             <div><h4 className="text-sm font-bold text-green-800">Terima Bersih (Net)</h4><p className="text-xs text-green-600">Plafon - Biaya - Blokir - Pelunasan - Simp. Pokok - Simp. Wajib</p></div>
+             <div><h4 className="text-sm font-bold text-green-800">Terima Bersih (Net)</h4><p className="text-xs text-green-600">Plafon - Biaya (Admin,Provisi,Mkt,CR,Flagging) - Simpanan - Pelunasan - Blokir</p></div>
              <div className="text-3xl font-bold text-green-700">Rp {formatIDR(netReceived)}</div>
           </div>
         </div>
@@ -639,19 +849,24 @@ export const CustomerForm: React.FC<CustomerFormProps> = ({ initialData, onSave,
            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
               <DocumentSlot category="KTP" label="KTP (Wajib)" />
               <DocumentSlot category="KK" label="Kartu Keluarga" />
-              <DocumentSlot category="SK" label="SK Pensiun" />
+              <DocumentSlot category="SK" label="SK Pensiun (Max 5)" multiple={true} maxCount={5} />
               <DocumentSlot category="KARIP" label="Karip / Buku Pensiun" />
 
               {/* Added Documents */}
               <DocumentSlot category="EPOT" label="e-Pot / Potongan" />
               <DocumentSlot category="DAPEM" label="Dapem / Gaji Berkala" />
-              <DocumentSlot category="SLIK" label="SLIK OJK (BI Checking)" />
-              <DocumentSlot category="ASABRI" label="Dokumen Asabri" />
+              <DocumentSlot category="SLIK" label="SLIK OJK (Max 5)" multiple={true} maxCount={5} />
+              <DocumentSlot category="ASABRI" label="Dokumen Asabri (Max 5)" multiple={true} maxCount={5} />
 
               {/* NEW Documents Slots */}
               <DocumentSlot category="NPWP" label="NPWP" />
               <DocumentSlot category="SLIP_GAJI" label="Slip Gaji Terakhir" />
-              <DocumentSlot category="REK_KORAN" label="Rekening Koran (3 Bln)" />
+              <DocumentSlot category="REK_KORAN" label="Rekening Koran (Max 5)" multiple={true} maxCount={5} />
+              
+              {/* Media & Others */}
+              <DocumentSlot category="VIDEO" label="Video Survey/Wawancara" acceptedTypes="video/*" />
+              <DocumentSlot category="AUDIO" label="Rekaman Suara" acceptedTypes="audio/*" />
+              <DocumentSlot category="OTHER" label="Dokumen Tambahan" multiple={true} maxCount={7} />
            </div>
            
            {/* Additional Uploads Code... (omitted for brevity as it's just repeating UI) */}
