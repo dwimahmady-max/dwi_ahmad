@@ -1,13 +1,14 @@
 
 import React, { useState, useEffect } from 'react';
-import { Customer, LoanType, MaritalStatus, InterestType, RepaymentType, CustomerStatus } from './types';
+import { Customer, LoanType, MaritalStatus, InterestType, RepaymentType, CustomerStatus, MarketingTarget } from './types';
 import { CustomerForm } from './components/CustomerForm';
 import { CustomerList } from './components/CustomerList';
 import { DocumentArchive } from './components/DocumentArchive';
 import { ArchiveForm } from './components/ArchiveForm';
 import { Dashboard } from './components/Dashboard';
+import { MarketingTargetList } from './components/MarketingTargetList';
 import { RepaymentModal } from './components/RepaymentModal';
-import { LayoutDashboard, Users, PlusCircle, Landmark, FolderArchive, FolderInput } from 'lucide-react';
+import { LayoutDashboard, Users, PlusCircle, Landmark, FolderArchive, FolderInput, BarChart3 } from 'lucide-react';
 
 const App = () => {
   // Initialize State from LocalStorage
@@ -19,10 +20,10 @@ const App = () => {
       }
     } catch (error) {
       console.error("Gagal memuat data dari penyimpanan:", error);
-      return []; // Return empty array on error to prevent zombie data
+      return []; 
     }
     
-    // Default Data Dummy (Only runs if localStorage is completely empty)
+    // Default Data Dummy 
     const initialData = [{
       id: '1',
       personal: {
@@ -71,14 +72,22 @@ const App = () => {
       },
       documents: [],
       status: CustomerStatus.ACTIVE,
+      marketingName: 'BUDI',
       createdAt: new Date().toISOString()
     }];
-    
     return initialData;
   });
 
+  // State for Marketing Targets
+  const [marketingTargets, setMarketingTargets] = useState<MarketingTarget[]>(() => {
+    try {
+        const saved = localStorage.getItem('koperasi_marketing_targets');
+        return saved ? JSON.parse(saved) : [];
+    } catch(e) { return []; }
+  });
+
   // Persist Active Tab
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'list' | 'files' | 'input' | 'archiveInput'>(() => {
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'list' | 'files' | 'input' | 'archiveInput' | 'marketingTargets'>(() => {
     return (localStorage.getItem('koperasi_ui_tab') as any) || 'dashboard';
   });
 
@@ -86,7 +95,6 @@ const App = () => {
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(() => {
     const editingId = localStorage.getItem('koperasi_ui_editing_id');
     if (editingId) {
-      // Find in current state is safer than reading localStorage again
       try {
         const dbStr = localStorage.getItem('koperasi_customers_db');
         if (dbStr) {
@@ -98,19 +106,20 @@ const App = () => {
     return null;
   });
 
-  // Persist Editing Archive
   const [editingArchive, setEditingArchive] = useState<Customer | null>(null);
-
-  // New State for Repayment/Status Update
   const [statusUpdateCustomer, setStatusUpdateCustomer] = useState<Customer | null>(null);
   
-  // Effect: Save DB to LocalStorage (Single Source of Truth)
-  // This ensures that whatever is in 'customers' state is EXACTLY what is in localStorage.
+  // Effect: Save DB
   useEffect(() => {
     localStorage.setItem('koperasi_customers_db', JSON.stringify(customers));
   }, [customers]);
 
-  // Effect: Listen for storage changes (for multiple tabs)
+  // Effect: Save Marketing Targets
+  useEffect(() => {
+    localStorage.setItem('koperasi_marketing_targets', JSON.stringify(marketingTargets));
+  }, [marketingTargets]);
+
+  // Effect: Listen for storage changes
   useEffect(() => {
     const handleStorageChange = (e: StorageEvent) => {
       if (e.key === 'koperasi_customers_db' && e.newValue) {
@@ -121,12 +130,10 @@ const App = () => {
     return () => window.removeEventListener('storage', handleStorageChange);
   }, []);
 
-  // Effect: Save UI State (Tab)
   useEffect(() => {
     localStorage.setItem('koperasi_ui_tab', activeTab);
   }, [activeTab]);
 
-  // Effect: Save UI State (Editing ID)
   useEffect(() => {
     if (editingCustomer) {
       localStorage.setItem('koperasi_ui_editing_id', editingCustomer.id);
@@ -174,17 +181,12 @@ const App = () => {
     setActiveTab('input');
   };
 
-  // LOGIKA TOP UP OTOMATIS
   const handleTopUpCustomer = (customer: Customer) => {
     const today = new Date();
     const loanDate = new Date(customer.nominative.loanDate);
-    
     let monthsPassed = (today.getFullYear() - loanDate.getFullYear()) * 12 + (today.getMonth() - loanDate.getMonth());
-    if (today.getDate() < loanDate.getDate()) {
-        monthsPassed--;
-    }
+    if (today.getDate() < loanDate.getDate()) monthsPassed--;
     monthsPassed = Math.max(0, monthsPassed);
-    
     const remainingMonths = Math.max(0, customer.nominative.tenureMonths - monthsPassed);
     const estimatedPayoffAmount = remainingMonths * customer.nominative.monthlyInstallment;
 
@@ -204,7 +206,6 @@ const App = () => {
             maturityDate: ''
         }
     };
-
     setEditingCustomer(topUpData);
     setActiveTab('input');
   };
@@ -222,15 +223,25 @@ const App = () => {
   const handleDeleteCustomer = (id: string) => {
     const isEditing = editingCustomer?.id === id;
     localStorage.removeItem(`koperasi_draft_${id}`);
-    
-    // Gunakan functional update untuk menjamin integritas data saat delete
     setCustomers(prevCustomers => prevCustomers.filter(c => c.id !== id));
-    
     if (isEditing) {
       setEditingCustomer(null);
       localStorage.removeItem('koperasi_ui_editing_id');
       setActiveTab('list');
     }
+  };
+
+  // Marketing Target Handlers
+  const handleSaveTarget = (target: MarketingTarget) => {
+      setMarketingTargets(prev => {
+          const exists = prev.some(t => t.id === target.id);
+          if (exists) return prev.map(t => t.id === target.id ? target : t);
+          return [...prev, target];
+      });
+  };
+
+  const handleDeleteTarget = (id: string) => {
+      setMarketingTargets(prev => prev.filter(t => t.id !== id));
   };
 
   const handleCancelForm = () => {
@@ -294,6 +305,11 @@ const App = () => {
               <NavItem tab="files" label="Daftar Arsip" icon={FolderArchive} />
               <NavItem tab="archiveInput" label={editingArchive ? "Edit Arsip" : "Input Arsip"} icon={FolderInput} subItem />
           </div>
+
+          <div className="mb-4">
+              <p className="px-4 text-xs font-semibold text-slate-400 uppercase mb-2">Laporan & Target</p>
+              <NavItem tab="marketingTargets" label="Target Marketing" icon={BarChart3} />
+          </div>
         </nav>
 
         <div className="p-6 border-t border-slate-100">
@@ -317,8 +333,8 @@ const App = () => {
           </div>
           <div className="flex gap-2">
             <button onClick={() => handleTabChange('dashboard')} className={`p-2 rounded ${activeTab === 'dashboard' ? 'bg-blue-100 text-blue-600' : 'text-slate-500'}`}><LayoutDashboard size={20}/></button>
+            <button onClick={() => handleTabChange('marketingTargets')} className={`p-2 rounded ${activeTab === 'marketingTargets' ? 'bg-blue-100 text-blue-600' : 'text-slate-500'}`}><BarChart3 size={20}/></button>
             <button onClick={() => handleTabChange('list')} className={`p-2 rounded ${activeTab === 'list' ? 'bg-blue-100 text-blue-600' : 'text-slate-500'}`}><Users size={20}/></button>
-            <button onClick={() => handleTabChange('files')} className={`p-2 rounded ${activeTab === 'files' ? 'bg-blue-100 text-blue-600' : 'text-slate-500'}`}><FolderArchive size={20}/></button>
           </div>
         </div>
 
@@ -351,6 +367,8 @@ const App = () => {
                 customers={customers} 
                 onEdit={handleEditArchive}
                 onAddNew={handleAddNewArchive}
+                onViewProfile={handleEditCustomer} 
+                onDelete={handleDeleteCustomer} 
               />
             </div>
           )}
@@ -373,6 +391,16 @@ const App = () => {
                     initialData={editingArchive}
                     onSave={handleSaveArchive}
                     onCancel={handleCancelArchive}
+                />
+             </div>
+          )}
+
+          {activeTab === 'marketingTargets' && (
+             <div className="space-y-6">
+                <MarketingTargetList 
+                    targets={marketingTargets}
+                    onSave={handleSaveTarget}
+                    onDelete={handleDeleteTarget}
                 />
              </div>
           )}

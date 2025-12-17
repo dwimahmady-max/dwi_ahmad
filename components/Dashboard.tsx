@@ -1,270 +1,193 @@
 
 import React from 'react';
 import { Customer, CustomerStatus } from '../types';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
-import { Wallet, Users, Banknote, TrendingUp, Clock, FileX, Skull, CheckCircle2, Building2, ArrowRightLeft } from 'lucide-react';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { Wallet, Users, Banknote, CalendarRange, TrendingUp, Calendar, CalendarDays } from 'lucide-react';
 
 interface DashboardProps {
   customers: Customer[];
 }
 
-const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042'];
-
 const formatCurrency = (val: number) => 
   new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(val);
 
 export const Dashboard: React.FC<DashboardProps> = ({ customers }) => {
-  // Filter only Active Customers for financial stats
-  const activeCustomers = customers.filter(c => c.status === CustomerStatus.ACTIVE || !c.status);
+  // Use all customers for historical data (Penyaluran), filtered by disbursement date
+  const now = new Date();
+  
+  // Helpers for date ranges
+  const startOfThisWeek = new Date(now);
+  startOfThisWeek.setDate(now.getDate() - now.getDay()); // Sunday as start
+  startOfThisWeek.setHours(0,0,0,0);
 
-  // Calculate Specific Status Counts
-  const today = new Date();
-  today.setHours(0,0,0,0);
+  const startOfThisMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+  const startOfThisYear = new Date(now.getFullYear(), 0, 1);
 
-  // 1. Lunas Otomatis: Status Aktif TAPI Tanggal Jadwal Lunas sudah lewat hari ini
-  const autoPaidCount = activeCustomers.filter(c => {
-    if (!c.nominative.maturityDate) return false;
-    const maturity = new Date(c.nominative.maturityDate);
-    return today > maturity;
-  }).length;
+  // --- STATISTIK WAKTU (PENYALURAN) ---
+  let totalWeek = 0;
+  let totalMonth = 0;
+  let totalYear = 0;
 
-  // 2. PKA (Pelunasan Dipercepat)
-  const pkaCount = customers.filter(c => c.status === CustomerStatus.PKA).length;
+  customers.forEach(c => {
+      // Logic: Hitung berdasarkan tanggal cair (disbursementDate)
+      // Abaikan status BATAL, tapi hitung Lunas/Aktif/PKA/Meninggal karena uang pernah cair
+      if (c.status === CustomerStatus.CANCELLED) return;
+      if (!c.nominative.disbursementDate) return;
 
-  // 3. Pembatalan
-  const cancelledCount = customers.filter(c => c.status === CustomerStatus.CANCELLED).length;
+      const cairDate = new Date(c.nominative.disbursementDate);
+      const amount = c.nominative.loanAmount;
 
-  // 4. Meninggal Dunia
-  const deceasedCount = customers.filter(c => c.status === CustomerStatus.DECEASED).length;
+      if (cairDate >= startOfThisWeek) totalWeek += amount;
+      if (cairDate >= startOfThisMonth) totalMonth += amount;
+      if (cairDate >= startOfThisYear) totalYear += amount;
+  });
 
-  // --- KANTOR BAYAR STATISTICS ---
-  const kbStats = {
-      POS: 0,
-      BTPN: 0,
-      BRI: 0,
-      MANTAP: 0,
-      TASPEN: 0,
-      MUTASI: 0
-  };
+  // --- TOP 10 PENYALURAN MARKETING (TAHUN INI) ---
+  const marketingStats: Record<string, number> = {};
 
-  activeCustomers.forEach(c => {
-      const kb = (c.pension.formerInstitution || '').toUpperCase();
-      const desc = (c.pension.skDescription || '').toUpperCase();
-      const mutationTarget = (c.pension.mutationOffice || '').trim();
+  customers.forEach(c => {
+      if (c.status === CustomerStatus.CANCELLED) return;
+      if (!c.nominative.disbursementDate) return;
       
-      // Categorize Kantor Bayar (Heuristic Matching)
-      if (kb.includes('POS') || kb.includes('POSINDO')) {
-          kbStats.POS++;
-      } else if (kb.includes('BTPN') || kb.includes('SMBC') || kb.includes('WOORI')) {
-          kbStats.BTPN++;
-      } else if (kb.includes('BRI') && !kb.includes('ASABRI')) { // Prevent matching 'ASABRI' word
-          kbStats.BRI++;
-      } else if (kb.includes('MANTAP') || kb.includes('MANDIRI TASPEN')) {
-          kbStats.MANTAP++;
-      } else if (kb.includes('TASPEN') || kb.includes('BP TASPEN')) {
-          kbStats.TASPEN++;
-      }
-
-      // Check Mutasi Status (Keyword Search OR New mutationOffice field)
-      if (kb.includes('MUTASI') || desc.includes('MUTASI') || mutationTarget.length > 0) {
-          kbStats.MUTASI++;
+      const cairDate = new Date(c.nominative.disbursementDate);
+      if (cairDate >= startOfThisYear) {
+          const mName = c.marketingName ? c.marketingName.trim().toUpperCase() : 'NON-MARKETING';
+          if (!marketingStats[mName]) marketingStats[mName] = 0;
+          marketingStats[mName] += c.nominative.loanAmount;
       }
   });
 
-  const kbChartData = [
-      { name: 'POS', value: kbStats.POS },
-      { name: 'BTPN', value: kbStats.BTPN },
-      { name: 'BRI', value: kbStats.BRI },
-      { name: 'MANTAP', value: kbStats.MANTAP },
-      { name: 'BP TASPEN', value: kbStats.TASPEN },
-  ];
+  // Convert to array and sort
+  const marketingChartData = Object.entries(marketingStats)
+      .map(([name, value]) => ({ name, value }))
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 10); // Top 10
 
-  // Aggregate data for Active Portfolio
-  const totalCustomers = activeCustomers.length;
-  const totalLoan = activeCustomers.reduce((acc, curr) => acc + curr.nominative.loanAmount, 0);
-  const totalInstallments = activeCustomers.reduce((acc, curr) => acc + curr.nominative.monthlyInstallment, 0);
-  
-  // Prepare chart data for Pension Type
-  const typeData = [
-    { name: 'Taspen', value: activeCustomers.filter(c => c.pension.pensionType === 'Taspen').length },
-    { name: 'Asabri', value: activeCustomers.filter(c => c.pension.pensionType === 'Asabri').length },
-  ].filter(d => d.value > 0);
-
-  const loanDistribution = activeCustomers.map(c => ({
-    name: c.personal.fullName.split(' ')[0], // First name only for brevity
-    plafon: c.nominative.loanAmount,
-    angsuran: c.nominative.monthlyInstallment
-  })).slice(0, 10); // Show top 10 recent
-
-  const StatCard = ({ title, value, icon: Icon, color }: any) => (
-    <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100 flex items-center space-x-4">
-      <div className={`p-3 rounded-full ${color} text-white`}>
-        <Icon size={24} />
-      </div>
+  // Stat Card Component
+  const StatCard = ({ title, value, icon: Icon, colorClass, subTitle }: any) => (
+    <div className="bg-white p-5 rounded-xl shadow-sm border border-slate-100 flex items-start justify-between">
       <div>
-        <p className="text-sm text-slate-500 font-medium">{title}</p>
-        <h3 className="text-2xl font-bold text-slate-800">{value}</h3>
+        <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">{title}</p>
+        <h3 className="text-xl font-bold text-slate-800">{value}</h3>
+        {subTitle && <p className="text-[10px] text-slate-400 mt-1">{subTitle}</p>}
+      </div>
+      <div className={`p-2.5 rounded-lg ${colorClass} text-white`}>
+        <Icon size={20} />
       </div>
     </div>
   );
 
   return (
     <div className="space-y-6 animate-fade-in">
-      {/* Main Stats Row */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard 
-          title="Nasabah Aktif" 
-          value={totalCustomers} 
-          icon={Users} 
-          color="bg-blue-500" 
-        />
-        <StatCard 
-          title="Portofolio Aktif" 
-          value={formatCurrency(totalLoan)} 
-          icon={Wallet} 
-          color="bg-emerald-500" 
-        />
-        <StatCard 
-          title="Est. Omzet Bulanan" 
-          value={formatCurrency(totalInstallments)} 
-          icon={Banknote} 
-          color="bg-indigo-500" 
-        />
+      
+      {/* 1. KARTU STATISTIK WAKTU */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
          <StatCard 
-          title="Rata-rata Tenor" 
-          value={`${activeCustomers.length > 0 ? Math.round(activeCustomers.reduce((a,c) => a+c.nominative.tenureMonths,0)/activeCustomers.length) : 0} Bulan`} 
-          icon={TrendingUp} 
-          color="bg-orange-500" 
-        />
+            title="Penyaluran Minggu Ini"
+            value={formatCurrency(totalWeek)}
+            icon={Calendar}
+            colorClass="bg-orange-500"
+            subTitle="Total pencairan minggu berjalan"
+         />
+         <StatCard 
+            title="Penyaluran Bulan Ini"
+            value={formatCurrency(totalMonth)}
+            icon={CalendarDays}
+            colorClass="bg-orange-600"
+            subTitle={`Periode ${now.toLocaleString('default', { month: 'long' })}`}
+         />
+         <StatCard 
+            title="Penyaluran Tahun Ini"
+            value={formatCurrency(totalYear)}
+            icon={CalendarRange}
+            colorClass="bg-orange-700"
+            subTitle={`Tahun ${now.getFullYear()}`}
+         />
       </div>
 
-      {/* Kantor Bayar Stats */}
-      <div>
-          <h3 className="text-sm font-bold text-slate-500 uppercase tracking-wide mb-3 ml-1 flex items-center gap-2">
-              <Building2 size={16} /> Sebaran Kantor Bayar
-          </h3>
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-               <div className="bg-white p-3 rounded-lg border border-orange-100 shadow-sm">
-                   <p className="text-[10px] text-slate-500 font-bold uppercase">Kantor POS</p>
-                   <p className="text-lg font-bold text-orange-600">{kbStats.POS}</p>
-               </div>
-               <div className="bg-white p-3 rounded-lg border border-indigo-100 shadow-sm">
-                   <p className="text-[10px] text-slate-500 font-bold uppercase">SMBC / BTPN</p>
-                   <p className="text-lg font-bold text-indigo-600">{kbStats.BTPN}</p>
-               </div>
-               <div className="bg-white p-3 rounded-lg border border-blue-100 shadow-sm">
-                   <p className="text-[10px] text-slate-500 font-bold uppercase">Bank BRI</p>
-                   <p className="text-lg font-bold text-blue-600">{kbStats.BRI}</p>
-               </div>
-               <div className="bg-white p-3 rounded-lg border border-yellow-100 shadow-sm">
-                   <p className="text-[10px] text-slate-500 font-bold uppercase">Bank MANTAP</p>
-                   <p className="text-lg font-bold text-yellow-600">{kbStats.MANTAP}</p>
-               </div>
-               <div className="bg-white p-3 rounded-lg border border-green-100 shadow-sm">
-                   <p className="text-[10px] text-slate-500 font-bold uppercase">BP TASPEN</p>
-                   <p className="text-lg font-bold text-green-600">{kbStats.TASPEN}</p>
-               </div>
-               <div className="bg-slate-800 p-3 rounded-lg border border-slate-700 shadow-sm text-white">
-                   <div className="flex items-center gap-1 mb-1">
-                      <ArrowRightLeft size={12} className="text-cyan-400" />
-                      <p className="text-[10px] font-bold uppercase text-cyan-100">Sedang Mutasi</p>
-                   </div>
-                   <p className="text-lg font-bold">{kbStats.MUTASI}</p>
-               </div>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        
+        {/* 2. CHART TOP 10 MARKETING (ORANGE STYLE) */}
+        <div className="lg:col-span-2 bg-white p-6 rounded-xl shadow-sm border border-slate-100 h-[450px]">
+          <div className="flex justify-between items-center mb-6">
+              <div>
+                <h3 className="text-lg font-bold text-slate-800">Top 10 Penyaluran Marketing</h3>
+                <p className="text-xs text-slate-500">Performa penyaluran kredit tertinggi tahun ini</p>
+              </div>
+              <div className="p-2 bg-orange-50 text-orange-600 rounded-lg">
+                  <TrendingUp size={20}/>
+              </div>
           </div>
-      </div>
-
-      {/* Secondary Stats Row: Resolution Status */}
-      <div>
-        <h3 className="text-sm font-bold text-slate-500 uppercase tracking-wide mb-3 ml-1">Status Penyelesaian & Non-Aktif</h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-            
-            {/* Lunas Otomatis */}
-            <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 flex items-center gap-3">
-                <div className="p-2 bg-green-100 text-green-600 rounded-lg">
-                    <Clock size={24} />
-                </div>
-                <div>
-                    <p className="text-xs text-slate-500 font-bold uppercase">Lunas (Jadwal)</p>
-                    <p className="text-xl font-bold text-slate-800">{autoPaidCount}</p>
-                </div>
-            </div>
-
-            {/* Pelunasan PKA */}
-            <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 flex items-center gap-3">
-                <div className="p-2 bg-emerald-100 text-emerald-600 rounded-lg">
-                    <CheckCircle2 size={24} />
-                </div>
-                <div>
-                    <p className="text-xs text-slate-500 font-bold uppercase">Pelunasan PKA</p>
-                    <p className="text-xl font-bold text-slate-800">{pkaCount}</p>
-                </div>
-            </div>
-
-            {/* Pembatalan */}
-            <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 flex items-center gap-3">
-                <div className="p-2 bg-red-100 text-red-600 rounded-lg">
-                    <FileX size={24} />
-                </div>
-                <div>
-                    <p className="text-xs text-slate-500 font-bold uppercase">Pembatalan</p>
-                    <p className="text-xl font-bold text-slate-800">{cancelledCount}</p>
-                </div>
-            </div>
-
-            {/* Meninggal Dunia */}
-            <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 flex items-center gap-3">
-                <div className="p-2 bg-slate-800 text-white rounded-lg">
-                    <Skull size={24} />
-                </div>
-                <div>
-                    <p className="text-xs text-slate-400 font-bold uppercase">Meninggal Dunia</p>
-                    <p className="text-xl font-bold text-slate-800">{deceasedCount}</p>
-                </div>
-            </div>
-
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Loan Distribution Chart */}
-        <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100 h-[400px]">
-          <h3 className="text-lg font-bold text-slate-800 mb-4">Top 10 Pinjaman Aktif Terakhir</h3>
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={loanDistribution} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
-              <CartesianGrid strokeDasharray="3 3" vertical={false} />
-              <XAxis dataKey="name" />
-              <YAxis />
-              <Tooltip formatter={(value: number) => formatCurrency(value)} />
-              <Bar dataKey="plafon" fill="#3b82f6" name="Plafon Pinjaman" radius={[4, 4, 0, 0]} />
-              <Bar dataKey="angsuran" fill="#10b981" name="Angsuran" radius={[4, 4, 0, 0]} />
+          
+          <ResponsiveContainer width="100%" height="85%">
+            <BarChart data={marketingChartData} layout="vertical" margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
+              <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} stroke="#f1f5f9" />
+              <XAxis type="number" hide />
+              <YAxis 
+                dataKey="name" 
+                type="category" 
+                width={120} 
+                tick={{fontSize: 11, fill: '#64748b', fontWeight: 600}} 
+                axisLine={false}
+                tickLine={false}
+              />
+              <Tooltip 
+                cursor={{fill: '#fff7ed'}}
+                contentStyle={{borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'}}
+                formatter={(value: number) => [formatCurrency(value), 'Total Penyaluran']}
+              />
+              <Bar 
+                dataKey="value" 
+                fill="#f97316" // Orange-500
+                radius={[0, 4, 4, 0]} 
+                barSize={20}
+                animationDuration={1500}
+              />
             </BarChart>
           </ResponsiveContainer>
         </div>
 
-        {/* Pension Type Distribution */}
-        <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100 h-[400px]">
-          <h3 className="text-lg font-bold text-slate-800 mb-4">Sebaran Jenis Pensiun</h3>
-          <ResponsiveContainer width="100%" height="100%">
-            <PieChart>
-              <Pie
-                data={typeData}
-                cx="50%"
-                cy="50%"
-                labelLine={false}
-                label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
-                outerRadius={120}
-                fill="#8884d8"
-                dataKey="value"
-              >
-                {typeData.map((entry, index) => (
-                  <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                ))}
-              </Pie>
-              <Tooltip />
-            </PieChart>
-          </ResponsiveContainer>
+        {/* 3. RINGKASAN PORTFOLIO (SIDEBAR STATS) */}
+        <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100 flex flex-col justify-between">
+           <div>
+               <h3 className="text-sm font-bold text-slate-800 mb-4 border-b pb-2">Ringkasan Portfolio</h3>
+               <div className="space-y-4">
+                   <div className="flex justify-between items-center">
+                       <span className="text-xs text-slate-500 font-medium">Nasabah Aktif</span>
+                       <span className="text-sm font-bold text-slate-800">{customers.filter(c => c.status === CustomerStatus.ACTIVE || !c.status).length} Orang</span>
+                   </div>
+                   <div className="flex justify-between items-center">
+                       <span className="text-xs text-slate-500 font-medium">Total Asset (OS)</span>
+                       <span className="text-sm font-bold text-blue-600">
+                           {formatCurrency(customers.filter(c => c.status === CustomerStatus.ACTIVE || !c.status).reduce((acc, c) => acc + c.nominative.loanAmount, 0))}
+                       </span>
+                   </div>
+                   <div className="flex justify-between items-center">
+                       <span className="text-xs text-slate-500 font-medium">Est. Bunga Masuk (Bln)</span>
+                       <span className="text-sm font-bold text-green-600">
+                           {/* Kasar: Angsuran - (Plafon/Tenor) */}
+                           {formatCurrency(customers.filter(c => c.status === CustomerStatus.ACTIVE || !c.status).reduce((acc, c) => {
+                               const pokok = c.nominative.loanAmount / c.nominative.tenureMonths;
+                               const bunga = c.nominative.monthlyInstallment - pokok;
+                               return acc + Math.max(0, bunga);
+                           }, 0))}
+                       </span>
+                   </div>
+               </div>
+           </div>
+
+           <div className="mt-6 pt-6 border-t border-slate-100">
+               <div className="bg-orange-50 p-4 rounded-lg border border-orange-100 text-center">
+                   <p className="text-xs text-orange-600 font-bold uppercase mb-1">Target Tahunan</p>
+                   <p className="text-2xl font-bold text-orange-700">85%</p>
+                   <div className="w-full bg-orange-200 h-1.5 rounded-full mt-2 overflow-hidden">
+                       <div className="bg-orange-500 h-1.5 rounded-full w-[85%]"></div>
+                   </div>
+                   <p className="text-[10px] text-orange-500 mt-2">Pencapaian penyaluran vs Target</p>
+               </div>
+           </div>
         </div>
+
       </div>
     </div>
   );

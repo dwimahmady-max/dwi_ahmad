@@ -1,17 +1,20 @@
 
 import React, { useState } from 'react';
 import { Customer, DocumentCategory } from '../types';
-import { Search, FolderArchive, FileText, CheckCircle2, FileCheck, Calendar, AlertCircle, FileSpreadsheet, Edit, PlusCircle, XCircle } from 'lucide-react';
+import { Search, FolderArchive, FileText, CheckCircle2, FileCheck, Calendar, AlertCircle, FileSpreadsheet, Edit, PlusCircle, XCircle, User, Trash2 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
 interface DocumentArchiveProps {
   customers: Customer[];
   onEdit: (customer: Customer) => void;
   onAddNew: () => void;
+  onViewProfile: (customer: Customer) => void; 
+  onDelete: (id: string) => void; // New Prop
 }
 
-export const DocumentArchive: React.FC<DocumentArchiveProps> = ({ customers, onEdit, onAddNew }) => {
+export const DocumentArchive: React.FC<DocumentArchiveProps> = ({ customers, onEdit, onAddNew, onViewProfile, onDelete }) => {
   const [searchTerm, setSearchTerm] = useState('');
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
 
   const filtered = customers.filter(c => 
     c.personal.fullName.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -148,7 +151,7 @@ export const DocumentArchive: React.FC<DocumentArchiveProps> = ({ customers, onE
                   const skDoc = getDocument(customer, 'SK');
                   
                   return (
-                    <tr key={customer.id} className="hover:bg-slate-50 transition">
+                    <tr key={customer.id} className={`transition border-b border-slate-50 ${deleteConfirmId === customer.id ? 'bg-red-50' : 'hover:bg-slate-50'}`}>
                       <td className="px-6 py-4">
                         <div className="font-bold text-slate-800">{customer.personal.fullName}</div>
                         <div className="text-xs text-slate-500 mt-1 flex items-center gap-1">
@@ -187,13 +190,55 @@ export const DocumentArchive: React.FC<DocumentArchiveProps> = ({ customers, onE
                          )}
                       </td>
                       <td className="px-6 py-4 text-center">
-                        <button 
-                            onClick={() => onEdit(customer)}
-                            className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition"
-                            title="Edit Data Arsip"
-                        >
-                            <Edit size={16} />
-                        </button>
+                        {deleteConfirmId === customer.id ? (
+                           <div className="flex items-center justify-center gap-2 animate-in fade-in slide-in-from-right-4 duration-300">
+                             <button 
+                               type="button"
+                               onClick={(e) => {
+                                 e.stopPropagation();
+                                 onDelete(customer.id);
+                                 setDeleteConfirmId(null);
+                               }}
+                               className="px-2 py-1.5 bg-red-600 text-white rounded shadow-sm hover:bg-red-700 transition flex items-center gap-1 text-[10px] font-bold"
+                             >
+                               Hapus?
+                             </button>
+                             <button 
+                               type="button"
+                               onClick={(e) => {
+                                 e.stopPropagation();
+                                 setDeleteConfirmId(null);
+                               }}
+                               className="px-2 py-1.5 bg-white border border-slate-300 text-slate-600 rounded hover:bg-slate-50 transition text-[10px] font-medium"
+                             >
+                               Batal
+                             </button>
+                           </div>
+                        ) : (
+                            <div className="flex justify-center gap-1">
+                                <button 
+                                    onClick={() => onViewProfile(customer)}
+                                    className="p-2 text-slate-600 hover:bg-slate-100 rounded-lg transition border border-transparent hover:border-slate-200"
+                                    title="Lihat Profil Lengkap"
+                                >
+                                    <User size={16} />
+                                </button>
+                                <button 
+                                    onClick={() => onEdit(customer)}
+                                    className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition border border-transparent hover:border-blue-200"
+                                    title="Edit Data Arsip"
+                                >
+                                    <Edit size={16} />
+                                </button>
+                                <button 
+                                    onClick={() => setDeleteConfirmId(customer.id)}
+                                    className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition border border-transparent hover:border-red-200"
+                                    title="Hapus Data"
+                                >
+                                    <Trash2 size={16} />
+                                </button>
+                            </div>
+                        )}
                       </td>
                     </tr>
                   );

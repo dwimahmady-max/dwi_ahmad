@@ -116,6 +116,9 @@ export interface Customer {
   nominative: NominativeData;
   documents: CustomerDocument[]; // List of uploaded file objects
   
+  // New Field for Dashboard Grouping
+  marketingName?: string; 
+
   // Status Tracking
   status: CustomerStatus;
   resolutionDate?: string; // Tanggal PKA/Meninggal/Batal
@@ -129,4 +132,20 @@ export interface DashboardStats {
   totalCustomers: number;
   totalLoanPortfolio: number;
   averageLoanSize: number;
+}
+
+// Interface for the new Marketing Table Layer
+export interface MarketingTarget {
+  id: string;
+  name: string;
+  branch: string;
+  noa: number; // Number of Accounts
+  week1: number;
+  week2: number;
+  week3: number;
+  week4: number;
+  week5: number;
+  targetAmount: number;
+  period: string; // e.g., "Desember 2025"
+  dailyRealization?: Record<string, number>; // key: "1" to "31"
 }

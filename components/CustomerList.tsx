@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import { Customer, LoanType, CustomerStatus } from '../types';
-import { Search, Edit, Trash2, AlertCircle, FileSpreadsheet, RefreshCw, CheckCircle, Wallet, MoreHorizontal, Settings2, Skull, FileX, Banknote } from 'lucide-react';
+import { Search, Edit, Trash2, AlertCircle, FileSpreadsheet, RefreshCw, CheckCircle, Wallet, MoreHorizontal, Settings2, Skull, FileX, Banknote, FolderCheck } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
 interface CustomerListProps {
@@ -147,6 +147,7 @@ export const CustomerList: React.FC<CustomerListProps> = ({ customers, onEdit, o
               filtered.map((customer) => {
                 const netReceived = calculateNetReceived(customer);
                 const totalInstallment = (customer.nominative.monthlyInstallment || 0) + (customer.nominative.mandatorySavings || 0);
+                const hasArchive = customer.documents && customer.documents.some(d => d.category === 'SK');
                 
                 // Cek status aktif untuk highlight baris
                 const isInactive = customer.status && customer.status !== CustomerStatus.ACTIVE;
@@ -162,6 +163,11 @@ export const CustomerList: React.FC<CustomerListProps> = ({ customers, onEdit, o
                         {customer.personal.fullName}
                       </div>
                       <div className="text-xs text-slate-500">NIK: {customer.personal.nik}</div>
+                      {hasArchive && (
+                          <div className="mt-1 inline-flex items-center gap-1 bg-orange-50 text-orange-700 border border-orange-200 px-1.5 py-0.5 rounded text-[10px] font-bold">
+                              <FolderCheck size={10} /> Arsip SK
+                          </div>
+                      )}
                     </td>
                     <td className="px-6 py-4">
                       <div className="font-medium">{customer.pension.pensionType}</div>
