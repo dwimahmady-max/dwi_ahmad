@@ -2,12 +2,14 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { Gender, PensionType, LoanType, MaritalStatus, InterestType, RepaymentType } from "../types";
 
+// Always use named parameter for apiKey and obtain from process.env.API_KEY
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
 export const parseCustomerData = async (inputText: string) => {
   try {
+    // Use gemini-3-pro-preview for complex text extraction tasks as per coding guidelines
     const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
+      model: "gemini-3-pro-preview",
       contents: `Extract customer information from the following unstructured text for a Cooperative Loan Application.
       
       Text to process:
@@ -79,6 +81,7 @@ export const parseCustomerData = async (inputText: string) => {
       }
     });
 
+    // Access text property directly from GenerateContentResponse
     return JSON.parse(response.text || "{}");
   } catch (error) {
     console.error("Error parsing with Gemini:", error);

@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Customer, LoanType, MaritalStatus, InterestType, RepaymentType, CustomerStatus, MarketingTarget } from './types';
 import { CustomerForm } from './components/CustomerForm';
 import { CustomerList } from './components/CustomerList';
@@ -8,7 +8,8 @@ import { ArchiveForm } from './components/ArchiveForm';
 import { Dashboard } from './components/Dashboard';
 import { MarketingTargetList } from './components/MarketingTargetList';
 import { RepaymentModal } from './components/RepaymentModal';
-import { LayoutDashboard, Users, PlusCircle, Landmark, FolderArchive, FolderInput, BarChart3 } from 'lucide-react';
+import { SettledCustomerList } from './components/SettledCustomerList';
+import { LayoutDashboard, Users, PlusCircle, Landmark, FolderArchive, FolderInput, BarChart3, Cloud, Download, Upload, Database, AlertTriangle, History } from 'lucide-react';
 
 const App = () => {
   // Initialize State from LocalStorage
@@ -22,60 +23,7 @@ const App = () => {
       console.error("Gagal memuat data dari penyimpanan:", error);
       return []; 
     }
-    
-    // Default Data Dummy 
-    const initialData = [{
-      id: '1',
-      personal: {
-        fullName: 'H. Soedirman',
-        nik: '3301123456780001',
-        birthDate: '1955-08-17',
-        gender: 'Laki-laki' as any,
-        maritalStatus: MaritalStatus.MARRIED,
-        address: 'Jl. Merdeka No. 45, Purwokerto',
-        phoneNumber: '08123456789'
-      },
-      pension: {
-        pensionNumber: '11002233',
-        formerInstitution: 'Dinas Pendidikan',
-        mutationOffice: '', 
-        pensionType: 'Taspen' as any,
-        skNumber: 'SK/2020/PENS/001',
-        skIssuanceDate: '2020-01-15',
-        skReceivedDate: '2023-09-20',
-        skDescription: 'SK Asli di Bank Jateng',
-        salaryAmount: 4500000
-      },
-      nominative: {
-        loanType: LoanType.NEW,
-        loanDate: '2023-09-25',
-        spkCode: 'SPK-001',
-        loanAmount: 50000000,
-        interestType: InterestType.ANNUITY,
-        interestRate: 35, 
-        tenureMonths: 24,
-        monthlyInstallment: 2900000, 
-        disbursementDate: '2023-10-01',
-        maturityDate: '2025-10-01',
-        repaymentNotes: '',
-        adminFee: 3750000, 
-        provisionFee: 1250000, 
-        marketingFee: 2500000, 
-        riskReserve: 5500000, 
-        flaggingFee: 50000, 
-        principalSavings: 20000, 
-        mandatorySavings: 100000, 
-        repaymentType: RepaymentType.TOPUP,
-        repaymentAmount: 0, 
-        blockedAmountSK: 0,
-        blockedInstallmentCount: 1
-      },
-      documents: [],
-      status: CustomerStatus.ACTIVE,
-      marketingName: 'BUDI',
-      createdAt: new Date().toISOString()
-    }];
-    return initialData;
+    return [];
   });
 
   // State for Marketing Targets
@@ -87,28 +35,15 @@ const App = () => {
   });
 
   // Persist Active Tab
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'list' | 'files' | 'input' | 'archiveInput' | 'marketingTargets'>(() => {
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'list' | 'files' | 'input' | 'archiveInput' | 'marketingTargets' | 'settled'>(() => {
     return (localStorage.getItem('koperasi_ui_tab') as any) || 'dashboard';
   });
 
-  // Persist Editing Customer
-  const [editingCustomer, setEditingCustomer] = useState<Customer | null>(() => {
-    const editingId = localStorage.getItem('koperasi_ui_editing_id');
-    if (editingId) {
-      try {
-        const dbStr = localStorage.getItem('koperasi_customers_db');
-        if (dbStr) {
-          const db = JSON.parse(dbStr);
-          return db.find((c: Customer) => c.id === editingId) || null;
-        }
-      } catch (e) { return null; }
-    }
-    return null;
-  });
-
+  const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
   const [editingArchive, setEditingArchive] = useState<Customer | null>(null);
   const [statusUpdateCustomer, setStatusUpdateCustomer] = useState<Customer | null>(null);
-  
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   // Effect: Save DB
   useEffect(() => {
     localStorage.setItem('koperasi_customers_db', JSON.stringify(customers));
@@ -119,52 +54,27 @@ const App = () => {
     localStorage.setItem('koperasi_marketing_targets', JSON.stringify(marketingTargets));
   }, [marketingTargets]);
 
-  // Effect: Listen for storage changes
-  useEffect(() => {
-    const handleStorageChange = (e: StorageEvent) => {
-      if (e.key === 'koperasi_customers_db' && e.newValue) {
-        setCustomers(JSON.parse(e.newValue));
-      }
-    };
-    window.addEventListener('storage', handleStorageChange);
-    return () => window.removeEventListener('storage', handleStorageChange);
-  }, []);
-
   useEffect(() => {
     localStorage.setItem('koperasi_ui_tab', activeTab);
   }, [activeTab]);
 
-  useEffect(() => {
-    if (editingCustomer) {
-      localStorage.setItem('koperasi_ui_editing_id', editingCustomer.id);
-    } else {
-      localStorage.removeItem('koperasi_ui_editing_id');
-    }
-  }, [editingCustomer]);
-
   const handleSaveCustomer = (customerData: Customer) => {
-    if (!customerData.status) customerData.status = CustomerStatus.ACTIVE;
-
-    setCustomers(prevCustomers => {
-        const exists = prevCustomers.some(c => c.id === customerData.id);
-        if (exists) {
-            return prevCustomers.map(c => c.id === customerData.id ? customerData : c);
-        } else {
-            return [customerData, ...prevCustomers];
-        }
+    setCustomers(prev => {
+        const exists = prev.some(c => c.id === customerData.id);
+        if (exists) return prev.map(c => c.id === customerData.id ? customerData : c);
+        return [customerData, ...prev];
     });
-
     setEditingCustomer(null);
     setActiveTab('list');
   };
   
   const handleSaveArchive = (customerData: Customer) => {
-    setCustomers(prevCustomers => {
-        const exists = prevCustomers.some(c => c.id === customerData.id);
+    setCustomers(prev => {
+        const exists = prev.some(c => c.id === customerData.id);
         if (exists) {
-            return prevCustomers.map(c => c.id === customerData.id ? customerData : c);
+            return prev.map(c => c.id === customerData.id ? customerData : c);
         } else {
-            return [customerData, ...prevCustomers];
+            return [customerData, ...prev];
         }
     });
     setEditingArchive(null);
@@ -202,7 +112,6 @@ const App = () => {
             repaymentType: RepaymentType.TOPUP,
             repaymentAmount: estimatedPayoffAmount, 
             loanAmount: 0,
-            adminFee: 0, provisionFee: 0, marketingFee: 0, riskReserve: 0, flaggingFee: 0,
             maturityDate: ''
         }
     };
@@ -221,17 +130,9 @@ const App = () => {
   };
 
   const handleDeleteCustomer = (id: string) => {
-    const isEditing = editingCustomer?.id === id;
-    localStorage.removeItem(`koperasi_draft_${id}`);
-    setCustomers(prevCustomers => prevCustomers.filter(c => c.id !== id));
-    if (isEditing) {
-      setEditingCustomer(null);
-      localStorage.removeItem('koperasi_ui_editing_id');
-      setActiveTab('list');
-    }
+    setCustomers(prev => prev.filter(c => c.id !== id));
   };
 
-  // Marketing Target Handlers
   const handleSaveTarget = (target: MarketingTarget) => {
       setMarketingTargets(prev => {
           const exists = prev.some(t => t.id === target.id);
@@ -244,32 +145,43 @@ const App = () => {
       setMarketingTargets(prev => prev.filter(t => t.id !== id));
   };
 
-  const handleCancelForm = () => {
-    setEditingCustomer(null);
-    setActiveTab('list');
+  // BACKUP & RESTORE
+  const handleExportData = () => {
+      const backupData = { customers, marketingTargets };
+      const blob = new Blob([JSON.stringify(backupData, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `backup_koperasi_${new Date().toISOString().split('T')[0]}.json`;
+      link.click();
   };
 
-  const handleCancelArchive = () => {
-    setEditingArchive(null);
-    setActiveTab('files');
-  };
-
-  const handleTabChange = (tab: any) => {
-    setActiveTab(tab);
-    if (tab !== 'input') setEditingCustomer(null);
-    if (tab !== 'archiveInput') setEditingArchive(null);
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (event) => {
+          try {
+              const json = JSON.parse(event.target?.result as string);
+              if (json.customers) setCustomers(json.customers);
+              if (json.marketingTargets) setMarketingTargets(json.marketingTargets);
+              alert("Data berhasil dipulihkan!");
+              setActiveTab('list');
+          } catch (err) { alert("File tidak valid."); }
+      };
+      reader.readAsText(file);
   };
 
   const NavItem = ({ tab, label, icon: Icon, subItem = false }: any) => (
     <button
-      onClick={() => handleTabChange(tab)}
-      className={`flex items-center gap-3 px-4 py-3 rounded-lg w-full transition-all duration-200 ${
+      onClick={() => { setActiveTab(tab); if(tab!=='input')setEditingCustomer(null); if(tab!=='archiveInput')setEditingArchive(null); }}
+      className={`flex items-center gap-3 px-4 py-3 rounded-xl w-full transition-all duration-300 ${
         activeTab === tab 
-          ? 'bg-blue-600 text-white shadow-md shadow-blue-200 font-medium' 
-          : 'text-slate-600 hover:bg-blue-50 hover:text-blue-600'
-      } ${subItem ? 'pl-8 text-sm' : ''}`}
+          ? 'bg-blue-600 text-white shadow-lg shadow-blue-200 font-bold' 
+          : 'text-slate-500 hover:bg-blue-50 hover:text-blue-600'
+      } ${subItem ? 'pl-8 text-xs' : 'text-sm'}`}
     >
-      <Icon size={subItem ? 18 : 20} />
+      <Icon size={subItem ? 16 : 20} />
       <span>{label}</span>
     </button>
   );
@@ -278,136 +190,105 @@ const App = () => {
     <div className="min-h-screen flex bg-[#FFFBEB]">
       
       {/* Sidebar */}
-      <aside className="w-64 bg-white border-r border-slate-200 hidden md:flex flex-col fixed h-full z-10">
-        <div className="p-6 border-b border-slate-100 flex items-center gap-3">
-          <div className="p-2 bg-blue-600 rounded-lg text-white">
+      <aside className="w-64 bg-white border-r border-slate-200 hidden md:flex flex-col fixed h-full z-10 shadow-sm">
+        <div className="p-8 flex items-center gap-3">
+          <div className="p-2.5 bg-blue-600 rounded-2xl text-white shadow-lg shadow-blue-100">
             <Landmark size={24} />
           </div>
           <div>
-            <h1 className="font-bold text-slate-800 leading-tight">Koperasi<br/>Anugerah Mandiri</h1>
+            <h1 className="font-black text-slate-800 leading-tight text-lg tracking-tighter italic">KJAM<br/><span className="text-[10px] not-italic font-bold text-slate-400 uppercase tracking-[0.2em]">Mandiri</span></h1>
           </div>
         </div>
         
-        <nav className="p-4 space-y-1 flex-1 overflow-y-auto">
-          <div className="mb-4">
-              <p className="px-4 text-xs font-semibold text-slate-400 uppercase mb-2">Utama</p>
+        <nav className="px-4 space-y-2 flex-1 overflow-y-auto">
+          <div className="mb-6">
+              <p className="px-4 text-[10px] font-black text-slate-300 uppercase mb-3 tracking-widest">Analytics</p>
               <NavItem tab="dashboard" label="Dashboard" icon={LayoutDashboard} />
           </div>
 
-          <div className="mb-4">
-              <p className="px-4 text-xs font-semibold text-slate-400 uppercase mb-2">Nasabah & Kredit</p>
-              <NavItem tab="list" label="Data Nasabah" icon={Users} />
-              <NavItem tab="input" label={editingCustomer ? "Edit / Top Up" : "Input Baru"} icon={PlusCircle} subItem />
+          <div className="mb-6">
+              <p className="px-4 text-[10px] font-black text-slate-300 uppercase mb-3 tracking-widest">Nasabah</p>
+              <NavItem tab="list" label="Database" icon={Users} />
+              <NavItem tab="settled" label="Nasabah Lunas" icon={History} />
+              <NavItem tab="input" label={editingCustomer ? "Edit Nasabah" : "Input Baru"} icon={PlusCircle} subItem />
           </div>
 
-          <div className="mb-4">
-              <p className="px-4 text-xs font-semibold text-slate-400 uppercase mb-2">Arsip & Dokumen</p>
-              <NavItem tab="files" label="Daftar Arsip" icon={FolderArchive} />
-              <NavItem tab="archiveInput" label={editingArchive ? "Edit Arsip" : "Input Arsip"} icon={FolderInput} subItem />
+          <div className="mb-6">
+              <p className="px-4 text-[10px] font-black text-slate-300 uppercase mb-3 tracking-widest">Arsip Fisik</p>
+              <NavItem tab="files" label="Daftar SK" icon={FolderArchive} />
+              <NavItem tab="archiveInput" label={editingArchive ? "Update Arsip" : "Input Arsip"} icon={FolderInput} subItem />
           </div>
 
-          <div className="mb-4">
-              <p className="px-4 text-xs font-semibold text-slate-400 uppercase mb-2">Laporan & Target</p>
-              <NavItem tab="marketingTargets" label="Target Marketing" icon={BarChart3} />
+          <div className="mb-6">
+              <p className="px-4 text-[10px] font-black text-slate-300 uppercase mb-3 tracking-widest">Marketing</p>
+              <NavItem tab="marketingTargets" label="Monitoring Target" icon={BarChart3} />
           </div>
         </nav>
 
         <div className="p-6 border-t border-slate-100">
-          <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
-            <p className="text-xs text-slate-500 font-medium mb-1">Status Sistem</p>
-            <div className="flex items-center gap-2">
-              <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
-              <span className="text-sm text-green-700 font-medium">Online & Saved</span>
+            <div className="space-y-2">
+                <button onClick={handleExportData} className="w-full flex items-center justify-between px-4 py-2 bg-slate-50 text-slate-600 rounded-xl text-xs font-bold hover:bg-slate-100 transition"><Download size={14} /> Backup DB</button>
+                <button onClick={() => fileInputRef.current?.click()} className="w-full flex items-center justify-between px-4 py-2 bg-slate-50 text-slate-600 rounded-xl text-xs font-bold hover:bg-slate-100 transition"><Upload size={14} /> Restore DB</button>
+                <input type="file" ref={fileInputRef} onChange={handleFileChange} accept=".json" className="hidden" />
             </div>
-          </div>
         </div>
       </aside>
 
       {/* Main Content */}
-      <main className="flex-1 md:ml-64 p-4 md:p-8 overflow-y-auto">
-        {/* Mobile Header */}
-        <div className="md:hidden flex items-center justify-between bg-white p-4 rounded-xl shadow-sm border border-slate-200 mb-6">
-          <div className="flex items-center gap-2 font-bold text-slate-800">
-            <Landmark size={20} className="text-blue-600" />
-            Koperasi Anugerah
-          </div>
-          <div className="flex gap-2">
-            <button onClick={() => handleTabChange('dashboard')} className={`p-2 rounded ${activeTab === 'dashboard' ? 'bg-blue-100 text-blue-600' : 'text-slate-500'}`}><LayoutDashboard size={20}/></button>
-            <button onClick={() => handleTabChange('marketingTargets')} className={`p-2 rounded ${activeTab === 'marketingTargets' ? 'bg-blue-100 text-blue-600' : 'text-slate-500'}`}><BarChart3 size={20}/></button>
-            <button onClick={() => handleTabChange('list')} className={`p-2 rounded ${activeTab === 'list' ? 'bg-blue-100 text-blue-600' : 'text-slate-500'}`}><Users size={20}/></button>
-          </div>
-        </div>
-
+      <main className="flex-1 md:ml-64 p-8">
         <div className="max-w-6xl mx-auto">
-          {activeTab === 'dashboard' && (
-            <div className="space-y-6">
-               <div>
-                <h1 className="text-2xl font-bold text-slate-800">Ringkasan Eksekutif</h1>
-                <p className="text-slate-500">Statistik performa Koperasi hari ini</p>
-              </div>
-              <Dashboard customers={customers} />
-            </div>
-          )}
-
+          {activeTab === 'dashboard' && <Dashboard customers={customers} />}
           {activeTab === 'list' && (
-            <div className="space-y-6">
-              <CustomerList 
-                customers={customers} 
-                onEdit={handleEditCustomer}
-                onDelete={handleDeleteCustomer}
-                onTopUp={handleTopUpCustomer}
-                onUpdateStatus={setStatusUpdateCustomer} // Pass handler
-              />
-            </div>
+            <CustomerList 
+              customers={customers.filter(c => c.status === CustomerStatus.ACTIVE || !c.status)} 
+              onEdit={handleEditCustomer}
+              onDelete={handleDeleteCustomer}
+              onTopUp={handleTopUpCustomer}
+              onUpdateStatus={setStatusUpdateCustomer}
+            />
           )}
-
-          {activeTab === 'files' && (
-            <div className="space-y-6">
-              <DocumentArchive 
+          {activeTab === 'settled' && (
+             <SettledCustomerList 
                 customers={customers} 
-                onEdit={handleEditArchive}
-                onAddNew={handleAddNewArchive}
+                onUpdateStatus={handleUpdateStatus}
                 onViewProfile={handleEditCustomer} 
-                onDelete={handleDeleteCustomer} 
-              />
-            </div>
-          )}
-
-          {activeTab === 'input' && (
-            <div className="space-y-6">
-              <CustomerForm 
-                initialData={editingCustomer}
-                onSave={handleSaveCustomer} 
-                onCancel={handleCancelForm} 
                 onDelete={handleDeleteCustomer}
-              />
-            </div>
+             />
           )}
-
+          {activeTab === 'files' && (
+            <DocumentArchive 
+              customers={customers} 
+              onEdit={handleEditArchive}
+              onAddNew={handleAddNewArchive}
+              onViewProfile={handleEditCustomer} 
+              onDelete={handleDeleteCustomer} 
+            />
+          )}
+          {activeTab === 'input' && (
+            <CustomerForm 
+              initialData={editingCustomer}
+              onSave={handleSaveCustomer} 
+              onCancel={() => {setEditingCustomer(null); setActiveTab('list');}} 
+            />
+          )}
           {activeTab === 'archiveInput' && (
-             <div className="space-y-6">
-                <ArchiveForm 
-                    customers={customers}
-                    initialData={editingArchive}
-                    onSave={handleSaveArchive}
-                    onCancel={handleCancelArchive}
-                />
-             </div>
+             <ArchiveForm 
+                customers={customers}
+                initialData={editingArchive}
+                onSave={handleSaveArchive}
+                onCancel={() => {setEditingArchive(null); setActiveTab('files');}}
+             />
           )}
-
           {activeTab === 'marketingTargets' && (
-             <div className="space-y-6">
-                <MarketingTargetList 
-                    targets={marketingTargets}
-                    onSave={handleSaveTarget}
-                    onDelete={handleDeleteTarget}
-                />
-             </div>
+             <MarketingTargetList 
+                targets={marketingTargets}
+                onSave={handleSaveTarget}
+                onDelete={handleDeleteTarget}
+             />
           )}
         </div>
       </main>
 
-      {/* Repayment / Status Modal */}
       {statusUpdateCustomer && (
         <RepaymentModal 
           customer={statusUpdateCustomer}
@@ -415,7 +296,6 @@ const App = () => {
           onClose={() => setStatusUpdateCustomer(null)}
         />
       )}
-
     </div>
   );
 };

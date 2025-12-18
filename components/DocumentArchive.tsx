@@ -9,7 +9,7 @@ interface DocumentArchiveProps {
   onEdit: (customer: Customer) => void;
   onAddNew: () => void;
   onViewProfile: (customer: Customer) => void; 
-  onDelete: (id: string) => void; // New Prop
+  onDelete: (id: string) => void; 
 }
 
 export const DocumentArchive: React.FC<DocumentArchiveProps> = ({ customers, onEdit, onAddNew, onViewProfile, onDelete }) => {
@@ -23,17 +23,14 @@ export const DocumentArchive: React.FC<DocumentArchiveProps> = ({ customers, onE
     (c.nominative.spkCode && c.nominative.spkCode.toLowerCase().includes(searchTerm.toLowerCase()))
   );
 
-  const getDocument = (c: Customer, category: DocumentCategory) => {
-    return c.documents.find(d => d.category === category);
-  };
-
-  const hasSkDocument = (c: Customer) => {
-      return c.documents.some(d => d.category === 'SK');
+  const getDocumentsByCategory = (c: Customer, category: DocumentCategory) => {
+    return c.documents.filter(d => d.category === category);
   };
 
   const handleExportExcel = () => {
     const dataToExport = filtered.map((c, index) => {
-        const skDoc = getDocument(c, 'SK');
+        const skDocs = getDocumentsByCategory(c, 'SK');
+        const withdrawDocs = getDocumentsByCategory(c, 'SURAT_PENARIKAN_BLOKIR');
         return {
             "No": index + 1,
             "Nama Pemilik SK": c.personal.fullName,
@@ -41,7 +38,8 @@ export const DocumentArchive: React.FC<DocumentArchiveProps> = ({ customers, onE
             "Nomor SK Pensiun": c.pension.skNumber,
             "No SPK": c.nominative.spkCode || '-',
             "Tgl Masuk (Arsip)": c.pension.skReceivedDate || '-',
-            "Status Tanda Terima": skDoc ? "Ada File" : "Belum Upload"
+            "Jumlah Berkas SK": skDocs.length,
+            "Jumlah Surat Penarikan": withdrawDocs.length
         };
     });
 
@@ -109,18 +107,18 @@ export const DocumentArchive: React.FC<DocumentArchiveProps> = ({ customers, onE
         <div className="bg-white p-4 rounded-xl border border-slate-200 flex items-center gap-3">
             <div className="p-3 bg-green-100 text-green-600 rounded-lg"><CheckCircle2 size={20}/></div>
             <div>
-                <p className="text-xs text-slate-500 font-bold uppercase">Tanda Terima Ada</p>
+                <p className="text-xs text-slate-500 font-bold uppercase">Tanda Terima Lengkap</p>
                 <p className="text-xl font-bold text-slate-800">
-                    {customers.filter(c => hasSkDocument(c)).length}
+                    {customers.filter(c => getDocumentsByCategory(c, 'SK').length > 0).length}
                 </p>
             </div>
         </div>
         <div className="bg-white p-4 rounded-xl border border-slate-200 flex items-center gap-3">
             <div className="p-3 bg-red-100 text-red-600 rounded-lg"><AlertCircle size={20}/></div>
             <div>
-                <p className="text-xs text-slate-500 font-bold uppercase">Belum Upload</p>
+                <p className="text-xs text-slate-500 font-bold uppercase">Belum Upload SK</p>
                 <p className="text-xl font-bold text-slate-800">
-                     {customers.length - customers.filter(c => hasSkDocument(c)).length}
+                     {customers.length - customers.filter(c => getDocumentsByCategory(c, 'SK').length > 0).length}
                 </p>
             </div>
         </div>
@@ -135,7 +133,7 @@ export const DocumentArchive: React.FC<DocumentArchiveProps> = ({ customers, onE
                 <th className="px-6 py-4 w-[20%]">Nomor SK Pensiun</th>
                 <th className="px-6 py-4 w-[15%]">No SPK</th>
                 <th className="px-6 py-4 w-[15%]">Tgl. Masuk (Arsip)</th>
-                <th className="px-6 py-4 text-center w-[15%]">Berkas</th>
+                <th className="px-6 py-4 text-center w-[15%]">Status Berkas</th>
                 <th className="px-6 py-4 text-center w-[10%]">Aksi</th>
               </tr>
             </thead>
@@ -148,7 +146,8 @@ export const DocumentArchive: React.FC<DocumentArchiveProps> = ({ customers, onE
                 </tr>
               ) : (
                 filtered.map((customer) => {
-                  const skDoc = getDocument(customer, 'SK');
+                  const skDocs = getDocumentsByCategory(customer, 'SK');
+                  const withdrawDocs = getDocumentsByCategory(customer, 'SURAT_PENARIKAN_BLOKIR');
                   
                   return (
                     <tr key={customer.id} className={`transition border-b border-slate-50 ${deleteConfirmId === customer.id ? 'bg-red-50' : 'hover:bg-slate-50'}`}>
@@ -172,22 +171,23 @@ export const DocumentArchive: React.FC<DocumentArchiveProps> = ({ customers, onE
                              <span className="text-slate-700 font-medium">{customer.pension.skReceivedDate || '-'}</span>
                           </div>
                       </td>
-                      <td className="px-6 py-4 text-center">
-                         {skDoc ? (
-                             <a 
-                                href={skDoc.url} 
-                                target="_blank" 
-                                rel="noreferrer"
-                                className="inline-flex items-center gap-1 px-3 py-1 bg-green-50 text-green-700 border border-green-200 rounded-full text-[10px] font-bold hover:bg-green-100 transition"
-                                title={skDoc.name}
-                            >
-                                <FileCheck size={12} /> Ada
-                            </a>
-                         ) : (
-                            <span className="inline-flex items-center gap-1 px-3 py-1 bg-red-50 text-red-500 border border-red-100 rounded-full text-[10px] font-medium">
-                                <XCircle size={12} /> Kosong
-                            </span>
-                         )}
+                      <td className="px-6 py-4 text-center space-y-1">
+                         <div className="flex flex-col gap-1 items-center">
+                            {skDocs.length > 0 ? (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-green-50 text-green-700 border border-green-200 rounded-full text-[9px] font-bold">
+                                    <FileCheck size={10} /> SK: {skDocs.length} File
+                                </span>
+                            ) : (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-red-50 text-red-500 border border-red-100 rounded-full text-[9px] font-medium">
+                                    <XCircle size={10} /> SK Kosong
+                                </span>
+                            )}
+                            {withdrawDocs.length > 0 && (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-blue-50 text-blue-700 border border-blue-200 rounded-full text-[9px] font-bold">
+                                    <FileCheck size={10} /> Blokir: {withdrawDocs.length} File
+                                </span>
+                            )}
+                         </div>
                       </td>
                       <td className="px-6 py-4 text-center">
                         {deleteConfirmId === customer.id ? (

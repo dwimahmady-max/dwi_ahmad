@@ -99,7 +99,16 @@ export interface NominativeData {
   blockedInstallmentCount: number; // Blokir Angsuran (bulan)
 }
 
-export type DocumentCategory = 'KTP' | 'KK' | 'SK' | 'KARIP' | 'EPOT' | 'DAPEM' | 'SLIK' | 'ASABRI' | 'NPWP' | 'SLIP_GAJI' | 'REK_KORAN' | 'OTHER' | 'AUDIO' | 'VIDEO' | 'BUKTI_LUNAS' | 'SURAT_KEMATIAN';
+export type DocumentCategory = 
+  | 'KTP' | 'KK' | 'SK' | 'KARIP' | 'EPOT' | 'DAPEM' | 'SLIK' | 'ASABRI' | 'NPWP' 
+  | 'SLIP_GAJI' | 'REK_KORAN' | 'OTHER' | 'AUDIO' | 'VIDEO' | 'BUKTI_LUNAS' 
+  | 'SURAT_KEMATIAN' | 'SURAT_PENARIKAN_BLOKIR'
+  | 'SPK' | 'APLIKASI_KREDIT' | 'PERNYATAAN_DEBITUR' | 'SKKT' 
+  | 'PERMOHONAN_ANGGOTA' | 'PERNYATAAN_MUTASI' | 'SURAT_KUASA' 
+  | 'BUKU_ANGGOTA' | 'PERNYATAAN_BATAL' | 'TANDA_TERIMA_SK' 
+  | 'NOTA_KREDIT' | 'KWITANSI' | 'KUASA_PENCAIRAN'
+  | 'TANDA_PENYERAHAN' | 'SK_ASLI'
+  | 'FOTO_NASABAH' | 'FOTO_NASABAH_MARKETING';
 
 export interface CustomerDocument {
   id: string;

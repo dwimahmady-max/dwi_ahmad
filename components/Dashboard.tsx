@@ -2,7 +2,8 @@
 import React from 'react';
 import { Customer, CustomerStatus } from '../types';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { Wallet, Users, Banknote, CalendarRange, TrendingUp, Calendar, CalendarDays } from 'lucide-react';
+import { Wallet, TrendingUp, Calendar, CalendarDays, Calculator, Landmark, Building2, FileSpreadsheet } from 'lucide-react';
+import * as XLSX from 'xlsx';
 
 interface DashboardProps {
   customers: Customer[];
@@ -12,182 +13,191 @@ const formatCurrency = (val: number) =>
   new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(val);
 
 export const Dashboard: React.FC<DashboardProps> = ({ customers }) => {
-  // Use all customers for historical data (Penyaluran), filtered by disbursement date
   const now = new Date();
-  
-  // Helpers for date ranges
   const startOfThisWeek = new Date(now);
-  startOfThisWeek.setDate(now.getDate() - now.getDay()); // Sunday as start
+  startOfThisWeek.setDate(now.getDate() - now.getDay());
   startOfThisWeek.setHours(0,0,0,0);
-
   const startOfThisMonth = new Date(now.getFullYear(), now.getMonth(), 1);
   const startOfThisYear = new Date(now.getFullYear(), 0, 1);
 
-  // --- STATISTIK WAKTU (PENYALURAN) ---
-  let totalWeek = 0;
-  let totalMonth = 0;
-  let totalYear = 0;
+  // LOGIKA HITUNG NET SAMA DENGAN FORM & LIST
+  const calculateNet = (c: Customer) => {
+    const nom = c.nominative;
+    const totalMonthly = (nom.monthlyInstallment || 0) + (nom.mandatorySavings || 0);
+    const totalPotonganAwal = (nom.riskReserve || 0) + (nom.adminFee || 0) + (nom.provisionFee || 0) + (nom.principalSavings || 0);
+    const totalAngsuranDimuka = (nom.blockedInstallmentCount || 0) * totalMonthly;
+    const totalAlokasiLain = (nom.blockedAmountSK || 0) + (nom.flaggingFee || 0) + (nom.repaymentAmount || 0);
+    return nom.loanAmount - totalPotonganAwal - totalAngsuranDimuka - totalAlokasiLain - (nom.marketingFee || 0);
+  };
 
-  customers.forEach(c => {
-      // Logic: Hitung berdasarkan tanggal cair (disbursementDate)
-      // Abaikan status BATAL, tapi hitung Lunas/Aktif/PKA/Meninggal karena uang pernah cair
-      if (c.status === CustomerStatus.CANCELLED) return;
-      if (!c.nominative.disbursementDate) return;
+  const handleExportMaster = () => {
+    if (customers.length === 0) {
+      alert("Tidak ada data untuk diexport.");
+      return;
+    }
 
-      const cairDate = new Date(c.nominative.disbursementDate);
-      const amount = c.nominative.loanAmount;
-
-      if (cairDate >= startOfThisWeek) totalWeek += amount;
-      if (cairDate >= startOfThisMonth) totalMonth += amount;
-      if (cairDate >= startOfThisYear) totalYear += amount;
-  });
-
-  // --- TOP 10 PENYALURAN MARKETING (TAHUN INI) ---
-  const marketingStats: Record<string, number> = {};
-
-  customers.forEach(c => {
-      if (c.status === CustomerStatus.CANCELLED) return;
-      if (!c.nominative.disbursementDate) return;
+    const dataToExport = customers.map((c, index) => {
+      const nom = c.nominative;
+      const pen = c.pension;
+      const net = calculateNet(c);
       
-      const cairDate = new Date(c.nominative.disbursementDate);
-      if (cairDate >= startOfThisYear) {
-          const mName = c.marketingName ? c.marketingName.trim().toUpperCase() : 'NON-MARKETING';
-          if (!marketingStats[mName]) marketingStats[mName] = 0;
-          marketingStats[mName] += c.nominative.loanAmount;
+      return {
+        "No": index + 1,
+        "Status": c.status || 'Aktif',
+        "Nama Nasabah": c.personal.fullName,
+        "NIK": `'${c.personal.nik}`,
+        "NOPEN": `'${pen.pensionNumber}`,
+        "Kantor Bayar": pen.formerInstitution || '-',
+        "Jenis Pensiun": pen.pensionType,
+        "No SK": pen.skNumber || '-',
+        "Tgl Keluar SK": pen.skIssuanceDate || '-',
+        "Tgl Terima Arsip": pen.skReceivedDate || '-',
+        "Plafon": nom.loanAmount,
+        "Tenor": nom.tenureMonths,
+        "Angsuran": nom.monthlyInstallment,
+        "Simp Wajib": nom.mandatorySavings,
+        "Total Potongan": (nom.riskReserve || 0) + (nom.adminFee || 0) + (nom.provisionFee || 0) + (nom.principalSavings || 0),
+        "Angsuran Dimuka": (nom.blockedInstallmentCount || 0) * (nom.monthlyInstallment + nom.mandatorySavings),
+        "Pelunasan Lama": nom.repaymentAmount || 0,
+        "Terima Bersih (Net)": net,
+        "Tgl Cair": nom.disbursementDate || '-',
+        "Marketing": c.marketingName || '-',
+        "Catatan Arsip": pen.skDescription || '-'
+      };
+    });
+
+    const worksheet = XLSX.utils.json_to_sheet(dataToExport);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Master Database KJAM");
+    
+    // Auto-width adjustment
+    const wscols = Object.keys(dataToExport[0]).map(() => ({ wch: 20 }));
+    worksheet['!cols'] = wscols;
+
+    XLSX.writeFile(workbook, `Laporan_Master_KJAM_${new Date().toISOString().split('T')[0]}.xlsx`);
+  };
+
+  let totalWeekNet = 0;
+  let totalMonthNet = 0;
+  let totalYearPlafon = 0;
+
+  const institutionStats = {
+    pos: 0,
+    smbc: 0,
+    bri: 0,
+    mantap: 0,
+    dpTaspen: 0,
+    lainnya: 0
+  };
+
+  customers.forEach(c => {
+      if (c.status !== CustomerStatus.CANCELLED) {
+        const inst = (c.pension.formerInstitution || '').toLowerCase();
+        if (inst.includes('pos')) institutionStats.pos++;
+        else if (inst.includes('smbc') || inst.includes('btpn')) institutionStats.smbc++;
+        else if (inst.includes('bri')) institutionStats.bri++;
+        else if (inst.includes('mantap')) institutionStats.mantap++;
+        else if (inst.includes('dp taspen') || inst.includes('dp-taspen')) institutionStats.dpTaspen++;
+        else institutionStats.lainnya++;
       }
+
+      if (c.status === CustomerStatus.CANCELLED) return;
+      if (!c.nominative.disbursementDate) return;
+      const cairDate = new Date(c.nominative.disbursementDate);
+      const net = calculateNet(c);
+
+      if (cairDate >= startOfThisWeek) totalWeekNet += net;
+      if (cairDate >= startOfThisMonth) totalMonthNet += net;
+      if (cairDate >= startOfThisYear) totalYearPlafon += c.nominative.loanAmount;
   });
 
-  // Convert to array and sort
-  const marketingChartData = Object.entries(marketingStats)
-      .map(([name, value]) => ({ name, value }))
-      .sort((a, b) => b.value - a.value)
-      .slice(0, 10); // Top 10
-
-  // Stat Card Component
   const StatCard = ({ title, value, icon: Icon, colorClass, subTitle }: any) => (
-    <div className="bg-white p-5 rounded-xl shadow-sm border border-slate-100 flex items-start justify-between">
+    <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex items-start justify-between transition-transform hover:scale-[1.02]">
       <div>
-        <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">{title}</p>
-        <h3 className="text-xl font-bold text-slate-800">{value}</h3>
+        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">{title}</p>
+        <h3 className="text-2xl font-black text-slate-800">{value}</h3>
         {subTitle && <p className="text-[10px] text-slate-400 mt-1">{subTitle}</p>}
       </div>
-      <div className={`p-2.5 rounded-lg ${colorClass} text-white`}>
-        <Icon size={20} />
+      <div className={`p-3 rounded-xl ${colorClass} text-white shadow-lg`}>
+        <Icon size={24} />
       </div>
+    </div>
+  );
+
+  const InstitutionBadge = ({ label, count, color }: { label: string, count: number, color: string }) => (
+    <div className="flex items-center justify-between p-3 rounded-xl border border-slate-100 bg-slate-50/50">
+      <div className="flex items-center gap-2">
+        <div className={`w-2 h-2 rounded-full ${color}`}></div>
+        <span className="text-xs font-bold text-slate-600 uppercase">{label}</span>
+      </div>
+      <span className="text-sm font-black text-slate-800">{count}</span>
     </div>
   );
 
   return (
     <div className="space-y-6 animate-fade-in">
-      
-      {/* 1. KARTU STATISTIK WAKTU */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-         <StatCard 
-            title="Penyaluran Minggu Ini"
-            value={formatCurrency(totalWeek)}
-            icon={Calendar}
-            colorClass="bg-orange-500"
-            subTitle="Total pencairan minggu berjalan"
-         />
-         <StatCard 
-            title="Penyaluran Bulan Ini"
-            value={formatCurrency(totalMonth)}
-            icon={CalendarDays}
-            colorClass="bg-orange-600"
-            subTitle={`Periode ${now.toLocaleString('default', { month: 'long' })}`}
-         />
-         <StatCard 
-            title="Penyaluran Tahun Ini"
-            value={formatCurrency(totalYear)}
-            icon={CalendarRange}
-            colorClass="bg-orange-700"
-            subTitle={`Tahun ${now.getFullYear()}`}
-         />
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+         <StatCard title="Penyaluran Bersih Minggu Ini" value={formatCurrency(totalWeekNet)} icon={Calendar} colorClass="bg-blue-600" subTitle="Total dana bersih cair ke anggota" />
+         <StatCard title="Penyaluran Bersih Bulan Ini" value={formatCurrency(totalMonthNet)} icon={CalendarDays} colorClass="bg-green-600" subTitle={`${now.toLocaleString('default', { month: 'long' })} ${now.getFullYear()}`} />
+         <StatCard title="Total Plafon Tahun Ini" value={formatCurrency(totalYearPlafon)} icon={TrendingUp} colorClass="bg-orange-600" subTitle="Akumulasi plafon kotor" />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        
-        {/* 2. CHART TOP 10 MARKETING (ORANGE STYLE) */}
-        <div className="lg:col-span-2 bg-white p-6 rounded-xl shadow-sm border border-slate-100 h-[450px]">
-          <div className="flex justify-between items-center mb-6">
+        <div className="lg:col-span-2 bg-white p-8 rounded-3xl shadow-sm border border-slate-200">
+          <div className="flex items-center justify-between mb-8">
+            <div className="flex items-center gap-3">
+              <div className="p-3 bg-blue-100 text-blue-600 rounded-2xl"><Building2 size={24}/></div>
               <div>
-                <h3 className="text-lg font-bold text-slate-800">Top 10 Penyaluran Marketing</h3>
-                <p className="text-xs text-slate-500">Performa penyaluran kredit tertinggi tahun ini</p>
+                  <h3 className="text-xl font-black text-slate-800">Distribusi Kantor Bayar</h3>
+                  <p className="text-sm text-slate-500">Pemetaan jumlah nasabah berdasarkan instansi bayar</p>
               </div>
-              <div className="p-2 bg-orange-50 text-orange-600 rounded-lg">
-                  <TrendingUp size={20}/>
-              </div>
+            </div>
           </div>
           
-          <ResponsiveContainer width="100%" height="85%">
-            <BarChart data={marketingChartData} layout="vertical" margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
-              <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} stroke="#f1f5f9" />
-              <XAxis type="number" hide />
-              <YAxis 
-                dataKey="name" 
-                type="category" 
-                width={120} 
-                tick={{fontSize: 11, fill: '#64748b', fontWeight: 600}} 
-                axisLine={false}
-                tickLine={false}
-              />
-              <Tooltip 
-                cursor={{fill: '#fff7ed'}}
-                contentStyle={{borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'}}
-                formatter={(value: number) => [formatCurrency(value), 'Total Penyaluran']}
-              />
-              <Bar 
-                dataKey="value" 
-                fill="#f97316" // Orange-500
-                radius={[0, 4, 4, 0]} 
-                barSize={20}
-                animationDuration={1500}
-              />
-            </BarChart>
-          </ResponsiveContainer>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              <InstitutionBadge label="PT POS" count={institutionStats.pos} color="bg-orange-500" />
+              <InstitutionBadge label="BTPN / SMBC" count={institutionStats.smbc} color="bg-blue-500" />
+              <InstitutionBadge label="BRI" count={institutionStats.bri} color="bg-blue-800" />
+              <InstitutionBadge label="Bank Mantap" count={institutionStats.mantap} color="bg-teal-500" />
+              <InstitutionBadge label="DP Taspen" count={institutionStats.dpTaspen} color="bg-blue-400" />
+              <InstitutionBadge label="Lainnya" count={institutionStats.lainnya} color="bg-slate-400" />
+          </div>
+
+          <div className="mt-10 h-[250px] flex items-center justify-center bg-slate-50 rounded-2xl border-2 border-dashed border-slate-200">
+             <p className="text-slate-400 font-medium italic">Sistem Pelaporan Terintegrasi Aktif</p>
+          </div>
         </div>
 
-        {/* 3. RINGKASAN PORTFOLIO (SIDEBAR STATS) */}
-        <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100 flex flex-col justify-between">
-           <div>
-               <h3 className="text-sm font-bold text-slate-800 mb-4 border-b pb-2">Ringkasan Portfolio</h3>
-               <div className="space-y-4">
-                   <div className="flex justify-between items-center">
-                       <span className="text-xs text-slate-500 font-medium">Nasabah Aktif</span>
-                       <span className="text-sm font-bold text-slate-800">{customers.filter(c => c.status === CustomerStatus.ACTIVE || !c.status).length} Orang</span>
-                   </div>
-                   <div className="flex justify-between items-center">
-                       <span className="text-xs text-slate-500 font-medium">Total Asset (OS)</span>
-                       <span className="text-sm font-bold text-blue-600">
-                           {formatCurrency(customers.filter(c => c.status === CustomerStatus.ACTIVE || !c.status).reduce((acc, c) => acc + c.nominative.loanAmount, 0))}
-                       </span>
-                   </div>
-                   <div className="flex justify-between items-center">
-                       <span className="text-xs text-slate-500 font-medium">Est. Bunga Masuk (Bln)</span>
-                       <span className="text-sm font-bold text-green-600">
-                           {/* Kasar: Angsuran - (Plafon/Tenor) */}
-                           {formatCurrency(customers.filter(c => c.status === CustomerStatus.ACTIVE || !c.status).reduce((acc, c) => {
-                               const pokok = c.nominative.loanAmount / c.nominative.tenureMonths;
-                               const bunga = c.nominative.monthlyInstallment - pokok;
-                               return acc + Math.max(0, bunga);
-                           }, 0))}
-                       </span>
-                   </div>
-               </div>
-           </div>
-
-           <div className="mt-6 pt-6 border-t border-slate-100">
-               <div className="bg-orange-50 p-4 rounded-lg border border-orange-100 text-center">
-                   <p className="text-xs text-orange-600 font-bold uppercase mb-1">Target Tahunan</p>
-                   <p className="text-2xl font-bold text-orange-700">85%</p>
-                   <div className="w-full bg-orange-200 h-1.5 rounded-full mt-2 overflow-hidden">
-                       <div className="bg-orange-500 h-1.5 rounded-full w-[85%]"></div>
-                   </div>
-                   <p className="text-[10px] text-orange-500 mt-2">Pencapaian penyaluran vs Target</p>
-               </div>
-           </div>
+        <div className="bg-white p-8 rounded-3xl shadow-sm border border-slate-200 flex flex-col justify-between">
+            <div className="space-y-6">
+                <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest border-b pb-4">Kesehatan Portofolio</h3>
+                <div className="space-y-4">
+                    <div className="flex justify-between items-center">
+                        <span className="text-xs text-slate-500 font-bold uppercase">Total Nasabah Terdaftar</span>
+                        <span className="text-lg font-black text-slate-800">{customers.length}</span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                        <span className="text-xs text-slate-500 font-bold uppercase">Total OS Plafon</span>
+                        <span className="text-lg font-black text-blue-600">{formatCurrency(customers.reduce((a,c) => a+c.nominative.loanAmount, 0))}</span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                        <span className="text-xs text-slate-500 font-bold uppercase">Rata-rata Plafon</span>
+                        <span className="text-lg font-black text-slate-800">
+                          {customers.length > 0 ? formatCurrency(Math.round(customers.reduce((a,c) => a+c.nominative.loanAmount, 0) / customers.length)) : 'Rp 0'}
+                        </span>
+                    </div>
+                </div>
+            </div>
+            <div className="mt-8 pt-8 border-t border-slate-100">
+                <button 
+                  onClick={handleExportMaster}
+                  className="w-full py-4 bg-slate-900 text-white font-black rounded-2xl shadow-xl hover:bg-black transition uppercase tracking-widest text-xs flex items-center justify-center gap-2 group"
+                >
+                  <FileSpreadsheet size={18} className="text-green-400 group-hover:scale-110 transition" /> 
+                  Cetak Laporan Lengkap (.xlsx)
+                </button>
+            </div>
         </div>
-
       </div>
     </div>
   );
