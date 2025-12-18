@@ -1,8 +1,8 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Customer, Gender, PensionType, LoanType, MaritalStatus, InterestType, RepaymentType, CustomerDocument, DocumentCategory, CustomerStatus } from '../types';
 import { parseCustomerData } from '../services/geminiService';
-import { Save, Sparkles, Loader2, Calculator, UploadCloud, FileText, FileImage, X, Wallet, Trash2, CheckCircle2, UserCircle, Info } from 'lucide-react';
+import { Save, Sparkles, Loader2, Calculator, UploadCloud, FileText, FileImage, X, Wallet, Trash2, CheckCircle2, UserCircle, Info, AlertCircle } from 'lucide-react';
 
 interface CustomerFormProps {
   initialData?: Customer | null;
@@ -38,10 +38,10 @@ const DEFAULT_FORM_DATA = {
     disbursementDate: new Date().toISOString().split('T')[0],
     maturityDate: '',
     repaymentNotes: '',
-    adminFee: 0, // Adm Kantor
-    provisionFee: 0, // Adm Pusat
-    marketingFee: 0, // Fee Marketing
-    riskReserve: 0, // Asuransi CRK
+    adminFee: 0, 
+    provisionFee: 0, 
+    marketingFee: 0, 
+    riskReserve: 0, 
     flaggingFee: 0, 
     principalSavings: 100000, 
     mandatorySavings: 20000,  
@@ -55,17 +55,13 @@ const DEFAULT_FORM_DATA = {
 const MONTH_NAMES = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"];
 
 export const CustomerForm: React.FC<CustomerFormProps> = ({ initialData, onSave, onCancel, onDelete }) => {
-  const [isProcessingAI, setIsProcessingAI] = useState(false);
-  const [aiInput, setAiInput] = useState('');
-  const [showAiModal, setShowAiModal] = useState(false);
-  const [uploadedFiles, setUploadedFiles] = useState<CustomerDocument[]>([]);
   const [formData, setFormData] = useState(DEFAULT_FORM_DATA);
+  const [uploadedFiles, setUploadedFiles] = useState<CustomerDocument[]>([]);
   const [dobDay, setDobDay] = useState('');
   const [dobMonth, setDobMonth] = useState('');
   const [dobYear, setDobYear] = useState('');
   const [age, setAge] = useState('');
-
-  const draftKey = initialData ? `koperasi_draft_${initialData.id}` : 'koperasi_draft_new';
+  const prevPlafon = useRef<number>(0);
 
   useEffect(() => {
     if (initialData) {
@@ -78,29 +74,38 @@ export const CustomerForm: React.FC<CustomerFormProps> = ({ initialData, onSave,
       };
       setFormData(baseData);
       setUploadedFiles(initialData.documents || []);
+      
+      if (baseData.birthDate) {
+          const [y, m, d] = baseData.birthDate.split('-');
+          setDobYear(y); setDobMonth(parseInt(m).toString()); setDobDay(parseInt(d).toString());
+          setAge((new Date().getFullYear() - parseInt(y)).toString());
+      }
     }
   }, [initialData]);
 
-  // Perhitungan Biaya Otomatis
+  // Perhitungan Biaya Otomatis (Hanya jika plafon berubah signifikan)
   useEffect(() => {
     const plafon = formData.loanAmount || 0;
-    setFormData(prev => ({
-      ...prev,
-      adminFee: Math.round(plafon * 0.075),     // B4: Adm Kantor
-      provisionFee: Math.round(plafon * 0.025), // B5: Adm Pusat
-      marketingFee: Math.round(plafon * 0.05),  // B10: Fee Marketing
-      riskReserve: Math.round(plafon * 0.11),   // B3: Asuransi CRK
-    }));
+    if (plafon !== prevPlafon.current && plafon > 0) {
+        setFormData(prev => ({
+          ...prev,
+          adminFee: Math.round(plafon * 0.075),
+          provisionFee: Math.round(plafon * 0.025),
+          marketingFee: Math.round(plafon * 0.05),
+          riskReserve: Math.round(plafon * 0.11),
+        }));
+        prevPlafon.current = plafon;
+    }
   }, [formData.loanAmount]);
 
-  // Perhitungan Angsuran & Jadwal
+  // Perhitungan Angsuran
   useEffect(() => {
     if (formData.loanAmount > 0 && formData.tenureMonths > 0) {
       const principal = formData.loanAmount;
       const months = formData.tenureMonths;
       let calculatedInstallment = 0;
-
       const monthlyInterestRate = (formData.interestRate / 100) / 12;
+
       if (formData.interestType === InterestType.ANNUITY) {
         calculatedInstallment = principal * (monthlyInterestRate / (1 - Math.pow(1 + monthlyInterestRate, -months)));
       } else {
@@ -119,22 +124,18 @@ export const CustomerForm: React.FC<CustomerFormProps> = ({ initialData, onSave,
     }
   }, [formData.loanAmount, formData.interestRate, formData.interestType, formData.tenureMonths, formData.disbursementDate]);
 
-  // --- LOGIKA TERIMA BERSIH (SINKRON DENGAN SPREADSHEET) ---
-  const totalMonthlyInstallment = (formData.monthlyInstallment || 0) + (formData.mandatorySavings || 0);
-  const totalAdministrasi = (formData.adminFee || 0) + (formData.provisionFee || 0);
-  const totalPotonganAwal = (formData.riskReserve || 0) + totalAdministrasi + (formData.principalSavings || 0);
-  const totalAngsuranDimuka = (formData.blockedInstallmentCount || 0) * totalMonthlyInstallment;
-  const totalAlokasiLain = (formData.blockedAmountSK || 0) + (formData.flaggingFee || 0) + (formData.repaymentAmount || 0);
-
-  const danaDiterimaCabang = (formData.loanAmount || 0) - totalPotonganAwal - totalAngsuranDimuka - totalAlokasiLain;
-  const netReceived = danaDiterimaCabang - (formData.marketingFee || 0);
-
-  const formatIDR = (val: number) => new Intl.NumberFormat('id-ID').format(val);
-
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const { name, value, type } = e.target;
     setFormData(prev => ({ ...prev, [name]: type === 'number' ? parseFloat(value) || 0 : value }));
   };
+
+  const totalMonthlyInstallment = (formData.monthlyInstallment || 0) + (formData.mandatorySavings || 0);
+  const totalPotonganAwal = (formData.riskReserve || 0) + (formData.adminFee || 0) + (formData.provisionFee || 0) + (formData.principalSavings || 0);
+  const totalAngsuranDimuka = (formData.blockedInstallmentCount || 0) * totalMonthlyInstallment;
+  const totalAlokasiLain = (formData.blockedAmountSK || 0) + (formData.flaggingFee || 0) + (formData.repaymentAmount || 0);
+  const netReceived = (formData.loanAmount || 0) - totalPotonganAwal - totalAngsuranDimuka - totalAlokasiLain - (formData.marketingFee || 0);
+
+  const formatIDR = (val: number) => new Intl.NumberFormat('id-ID').format(val);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -161,18 +162,14 @@ export const CustomerForm: React.FC<CustomerFormProps> = ({ initialData, onSave,
             <Calculator className="text-blue-600" />
             {initialData ? 'Edit Data Nasabah' : 'Input Data Nasabah Baru'}
         </h2>
-        <div className="flex gap-2">
-            <button type="button" onClick={() => setShowAiModal(true)} className="bg-purple-600 text-white px-4 py-2 rounded-lg text-sm font-medium shadow-sm flex items-center gap-2"><Sparkles size={16} /> AI Auto-Fill</button>
-        </div>
       </div>
 
       <form onSubmit={handleSubmit} className="p-6 space-y-8">
-        {/* I. Identitas */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="space-y-4">
                 <h3 className="text-xs font-black text-blue-600 uppercase border-b pb-2 tracking-widest">I. Data Pribadi</h3>
                 <div className="space-y-3">
-                    <div className="space-y-1"><label className="text-[10px] font-bold text-slate-400 uppercase">Nama Lengkap</label><input required name="fullName" value={formData.fullName} onChange={handleInputChange} className="w-full border p-2 rounded focus:ring-2 focus:ring-blue-500 outline-none" /></div>
+                    <div className="space-y-1"><label className="text-[10px] font-bold text-slate-400 uppercase">Nama Lengkap</label><input required name="fullName" value={formData.fullName} onChange={handleInputChange} className="w-full border p-2 rounded focus:ring-2 focus:ring-blue-500 outline-none font-bold" /></div>
                     <div className="space-y-1"><label className="text-[10px] font-bold text-slate-400 uppercase">NIK</label><input required name="nik" value={formData.nik} onChange={handleInputChange} className="w-full border p-2 rounded" /></div>
                     <div className="space-y-1">
                         <label className="text-[10px] font-bold text-slate-400 uppercase">Tgl Lahir & Usia</label>
@@ -192,14 +189,14 @@ export const CustomerForm: React.FC<CustomerFormProps> = ({ initialData, onSave,
             <div className="space-y-4">
                 <h3 className="text-xs font-black text-blue-600 uppercase border-b pb-2 tracking-widest">II. Data Pensiun</h3>
                 <div className="space-y-3">
-                    <div className="space-y-1"><label className="text-[10px] font-bold text-slate-400 uppercase">NOPEN</label><input required name="pensionNumber" value={formData.pensionNumber} onChange={handleInputChange} className="w-full border p-2 rounded" /></div>
+                    <div className="space-y-1"><label className="text-[10px] font-bold text-slate-400 uppercase">NOPEN</label><input required name="pensionNumber" value={formData.pensionNumber} onChange={handleInputChange} className="w-full border p-2 rounded font-bold" /></div>
                     <div className="space-y-1"><label className="text-[10px] font-bold text-slate-400 uppercase">Gaji Pensiun</label><input type="number" name="salaryAmount" value={formData.salaryAmount || ''} onChange={handleInputChange} className="w-full border border-green-200 bg-green-50 p-2 rounded font-bold" /></div>
                     <div className="space-y-1"><label className="text-[10px] font-bold text-slate-400 uppercase">Kantor Bayar</label><input name="formerInstitution" value={formData.formerInstitution} onChange={handleInputChange} className="w-full border p-2 rounded" /></div>
+                    <div className="space-y-1"><label className="text-[10px] font-bold text-slate-400 uppercase">Marketing</label><input name="marketingName" value={formData.marketingName} onChange={handleInputChange} className="w-full border p-2 rounded" placeholder="Nama Marketing..." /></div>
                 </div>
             </div>
         </div>
 
-        {/* III. Struktur Pinjaman */}
         <div className="bg-slate-50 p-6 rounded-2xl border border-slate-200">
             <h3 className="text-xs font-black text-slate-500 uppercase mb-4 tracking-widest flex items-center gap-2">
                 <Calculator size={16} /> III. Nominatif & Struktur Kredit
@@ -209,11 +206,11 @@ export const CustomerForm: React.FC<CustomerFormProps> = ({ initialData, onSave,
                 <div className="space-y-4">
                     <div className="space-y-1">
                         <label className="text-xs font-bold text-slate-600 uppercase">Plafon Pinjaman</label>
-                        <div className="relative"><span className="absolute left-3 top-2.5 text-slate-400 text-sm">Rp</span><input type="number" name="loanAmount" value={formData.loanAmount || ''} onChange={handleInputChange} className="w-full border-2 border-blue-100 p-2.5 pl-10 rounded-xl font-black text-xl text-blue-700 focus:border-blue-500 outline-none" /></div>
+                        <div className="relative"><span className="absolute left-3 top-2.5 text-slate-400 text-sm">Rp</span><input type="number" name="loanAmount" value={formData.loanAmount || ''} onChange={handleInputChange} className="w-full border-2 border-blue-100 p-2.5 pl-10 rounded-xl font-black text-xl text-blue-700 focus:border-blue-500 outline-none shadow-sm" /></div>
                     </div>
                     <div className="flex gap-4">
-                        <div className="flex-1 space-y-1"><label className="text-[10px] font-bold text-slate-400">TENOR (BLN)</label><input type="number" name="tenureMonths" value={formData.tenureMonths || ''} onChange={handleInputChange} className="w-full border p-2 rounded" /></div>
-                        <div className="flex-1 space-y-1"><label className="text-[10px] font-bold text-slate-400">BUNGA %</label><input type="number" name="interestRate" value={formData.interestRate || ''} onChange={handleInputChange} className="w-full border p-2 rounded" /></div>
+                        <div className="flex-1 space-y-1"><label className="text-[10px] font-bold text-slate-400">TENOR (BLN)</label><input type="number" name="tenureMonths" value={formData.tenureMonths || ''} onChange={handleInputChange} className="w-full border p-2 rounded font-bold" /></div>
+                        <div className="flex-1 space-y-1"><label className="text-[10px] font-bold text-slate-400">BUNGA %</label><input type="number" name="interestRate" value={formData.interestRate || ''} onChange={handleInputChange} className="w-full border p-2 rounded font-bold" /></div>
                     </div>
                 </div>
 
@@ -231,19 +228,36 @@ export const CustomerForm: React.FC<CustomerFormProps> = ({ initialData, onSave,
                 <div className="space-y-4 border-l border-slate-200 pl-6">
                     <label className="text-xs font-bold text-red-600 uppercase">Alokasi Plafond Lain</label>
                     <div className="space-y-2">
-                        <div className="relative"><span className="absolute left-2 top-1.5 text-[10px] text-slate-400">Rp</span><input type="number" name="blockedAmountSK" placeholder="Blokir SK" value={formData.blockedAmountSK || ''} onChange={handleInputChange} className="w-full border border-red-100 bg-red-50/50 p-1.5 pl-7 rounded text-xs" /></div>
-                        <div className="relative"><span className="absolute left-2 top-1.5 text-[10px] text-slate-400">Rp</span><input type="number" name="flaggingFee" placeholder="Flagging" value={formData.flaggingFee || ''} onChange={handleInputChange} className="w-full border border-red-100 bg-red-50/50 p-1.5 pl-7 rounded text-xs" /></div>
-                        <div className="relative"><span className="absolute left-2 top-1.5 text-[10px] text-slate-400">Rp</span><input type="number" name="repaymentAmount" placeholder="Pelunasan" value={formData.repaymentAmount || ''} onChange={handleInputChange} className="w-full border border-red-100 bg-red-50/50 p-1.5 pl-7 rounded text-xs" /></div>
+                        <div className="relative"><span className="absolute left-2 top-1.5 text-[10px] text-slate-400">Rp</span><input type="number" name="blockedAmountSK" placeholder="Blokir SK" value={formData.blockedAmountSK || ''} onChange={handleInputChange} className="w-full border border-red-100 bg-red-50/50 p-1.5 pl-7 rounded text-xs font-bold" /></div>
+                        <div className="relative"><span className="absolute left-2 top-1.5 text-[10px] text-slate-400">Rp</span><input type="number" name="flaggingFee" placeholder="Flagging" value={formData.flaggingFee || ''} onChange={handleInputChange} className="w-full border border-red-100 bg-red-50/50 p-1.5 pl-7 rounded text-xs font-bold" /></div>
+                        <div className="relative"><span className="absolute left-2 top-1.5 text-[10px] text-slate-400">Rp</span><input type="number" name="repaymentAmount" placeholder="Pelunasan" value={formData.repaymentAmount || ''} onChange={handleInputChange} className="w-full border border-red-100 bg-red-50/50 p-1.5 pl-7 rounded text-xs font-bold" /></div>
                     </div>
                 </div>
             </div>
 
-            {/* Rincian Potongan */}
             <div className="mt-8 grid grid-cols-2 md:grid-cols-4 gap-4 pt-6 border-t border-slate-200">
-                <div className="space-y-1"><label className="text-[10px] font-bold text-slate-400">ASURANSI / CRK</label><input readOnly value={formatIDR(formData.riskReserve)} className="w-full bg-white border p-2 rounded text-xs" /></div>
-                <div className="space-y-1"><label className="text-[10px] font-bold text-slate-400">ADM KANTOR</label><input readOnly value={formatIDR(formData.adminFee)} className="w-full bg-white border p-2 rounded text-xs" /></div>
-                <div className="space-y-1"><label className="text-[10px] font-bold text-slate-400">ADM PUSAT</label><input readOnly value={formatIDR(formData.provisionFee)} className="w-full bg-white border p-2 rounded text-xs" /></div>
-                <div className="space-y-1"><label className="text-[10px] font-bold text-slate-400">SIMP. POKOK</label><input type="number" name="principalSavings" value={formData.principalSavings || ''} onChange={handleInputChange} className="w-full bg-white border border-blue-200 p-2 rounded text-xs font-bold" /></div>
+                <div className="space-y-1">
+                    {/* Fix: Wrap AlertCircle icon in a span to use the title attribute for tooltips as Lucide components don't have a title prop */}
+                    <label className="text-[10px] font-bold text-slate-400 flex items-center gap-1">
+                      ASURANSI / CRK 
+                      <span title="Bisa diedit manual">
+                        <AlertCircle size={10} />
+                      </span>
+                    </label>
+                    <input type="number" name="riskReserve" value={formData.riskReserve || ''} onChange={handleInputChange} className="w-full bg-white border border-blue-200 p-2 rounded text-xs font-black text-blue-700 focus:border-blue-500 outline-none" />
+                </div>
+                <div className="space-y-1">
+                    <label className="text-[10px] font-bold text-slate-400">ADM KANTOR</label>
+                    <input type="number" name="adminFee" value={formData.adminFee || ''} onChange={handleInputChange} className="w-full bg-white border border-blue-100 p-2 rounded text-xs font-bold focus:border-blue-500 outline-none" />
+                </div>
+                <div className="space-y-1">
+                    <label className="text-[10px] font-bold text-slate-400">ADM PUSAT</label>
+                    <input type="number" name="provisionFee" value={formData.provisionFee || ''} onChange={handleInputChange} className="w-full bg-white border border-blue-100 p-2 rounded text-xs font-bold focus:border-blue-500 outline-none" />
+                </div>
+                <div className="space-y-1">
+                    <label className="text-[10px] font-bold text-slate-400">SIMP. POKOK</label>
+                    <input type="number" name="principalSavings" value={formData.principalSavings || ''} onChange={handleInputChange} className="w-full bg-white border border-blue-200 p-2 rounded text-xs font-bold" />
+                </div>
                 
                 <div className="col-span-2 p-3 bg-red-50 rounded-xl border border-red-100 flex items-center justify-between">
                     <div>
@@ -257,19 +271,20 @@ export const CustomerForm: React.FC<CustomerFormProps> = ({ initialData, onSave,
                 </div>
 
                 <div className="col-span-2 p-3 bg-orange-50 rounded-xl border border-orange-100 flex items-center justify-between">
-                    <label className="text-[10px] font-bold text-orange-600 uppercase">Fee Marketing (5%)</label>
-                    <span className="text-sm font-black text-orange-700">Rp {formatIDR(formData.marketingFee)}</span>
+                    <div>
+                        <label className="text-[10px] font-bold text-orange-600 uppercase block">Fee Marketing (5%)</label>
+                        <div className="flex items-center gap-2">
+                             <span className="text-slate-400 text-xs">Rp</span>
+                             <input type="number" name="marketingFee" value={formData.marketingFee || ''} onChange={handleInputChange} className="bg-transparent border-none p-0 font-black text-orange-700 text-sm outline-none w-32" />
+                        </div>
+                    </div>
+                    <div className="p-2 bg-orange-100 rounded-lg text-orange-600"><UserCircle size={20}/></div>
                 </div>
             </div>
 
-            {/* HASIL AKHIR */}
             <div className="mt-8 flex flex-col md:flex-row gap-4">
-                <div className="flex-1 bg-white p-4 rounded-2xl border-2 border-slate-200 flex justify-between items-center">
-                    <div><p className="text-[10px] font-bold text-slate-400 uppercase">Dana Diterima Cabang</p><p className="text-xl font-black text-slate-700">Rp {formatIDR(danaDiterimaCabang)}</p></div>
-                    <Info size={20} className="text-slate-300" />
-                </div>
                 <div className="flex-1 bg-green-600 p-4 rounded-2xl shadow-xl shadow-green-100 flex justify-between items-center text-white">
-                    <div><p className="text-[10px] font-bold text-green-100 uppercase tracking-widest">Dana Bersih Anggota</p><p className="text-2xl font-black">Rp {formatIDR(netReceived)}</p></div>
+                    <div><p className="text-[10px] font-bold text-green-100 uppercase tracking-widest">Dana Bersih Diterima Anggota (Net)</p><p className="text-2xl font-black">Rp {formatIDR(netReceived)}</p></div>
                     <div className="p-2 bg-green-500 rounded-lg"><Wallet size={24} /></div>
                 </div>
             </div>
